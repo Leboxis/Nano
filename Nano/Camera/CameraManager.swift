@@ -41,6 +41,11 @@ class CameraManager: NSObject, ObservableObject {
         defaults.string(forKey: "videoQuality") ?? "1080p"
     }
 
+    private var videoFPS: Int {
+        let val = defaults.integer(forKey: "videoFPS")
+        return val > 0 ? val : 30
+    }
+
     private var zoomLevel: Int {
         let val = defaults.integer(forKey: "zoomLevel")
         return val > 0 ? val : 1
@@ -143,8 +148,9 @@ class CameraManager: NSObject, ObservableObject {
             session.commitConfiguration()
             self.captureSession = session
 
-            // Apply zoom after session is configured
+            // Apply zoom and frame rate after session is configured
             self.applyZoomNow()
+            self.applyFrameRateNow()
         }
     }
 
@@ -211,6 +217,9 @@ class CameraManager: NSObject, ObservableObject {
             session.beginConfiguration()
             self.applySessionPreset(session: session)
             session.commitConfiguration()
+            if mode == .video {
+                self.applyFrameRateNow()
+            }
         }
     }
 
@@ -225,6 +234,15 @@ class CameraManager: NSObject, ObservableObject {
                 session.sessionPreset = preset
             }
             session.commitConfiguration()
+            self.applyFrameRateNow()
+        }
+    }
+
+    func updateVideoFPS(_ fps: Int) {
+        defaults.set(fps, forKey: "videoFPS")
+
+        sessionQueue.async { [weak self] in
+            self?.applyFrameRateNow()
         }
     }
 
@@ -238,6 +256,44 @@ class CameraManager: NSObject, ObservableObject {
             session.beginConfiguration()
             self.applySessionPreset(session: session)
             session.commitConfiguration()
+            self.applyFrameRateNow()
+        }
+    }
+
+    // MARK: - Frame Rate (FPS)
+
+    private func applyFrameRateNow() {
+        guard let camera = self.currentCamera else { return }
+
+        let targetFPS = Double(self.videoFPS)
+
+        do {
+            try camera.lockForConfiguration()
+
+            var bestRange: AVFrameRateRange?
+            for range in camera.activeFormat.videoSupportedFrameRateRanges {
+                if targetFPS >= range.minFrameRate && targetFPS <= range.maxFrameRate {
+                    bestRange = range
+                    break
+                }
+            }
+
+            if let range = bestRange {
+                let duration = CMTime(value: 1, timescale: Int32(targetFPS))
+                camera.activeVideoMinFrameDuration = duration
+                camera.activeVideoMaxFrameDuration = duration
+                print("CameraManager: Frame rate set to \(targetFPS) FPS (range \(range.minFrameRate)-\(range.maxFrameRate))")
+            } else if let maxRange = camera.activeFormat.videoSupportedFrameRateRanges.max(by: { $0.maxFrameRate < $1.maxFrameRate }) {
+                let maxFPS = maxRange.maxFrameRate
+                let duration = CMTime(value: 1, timescale: Int32(maxFPS))
+                camera.activeVideoMinFrameDuration = duration
+                camera.activeVideoMaxFrameDuration = duration
+                print("CameraManager: Frame rate clamped to max supported \(maxFPS) FPS")
+            }
+
+            camera.unlockForConfiguration()
+        } catch {
+            print("CameraManager: Failed to set frame rate: \(error)")
         }
     }
 
@@ -303,8 +359,9 @@ class CameraManager: NSObject, ObservableObject {
 
             session.commitConfiguration()
 
-            // Re-apply zoom on new camera
+            // Re-apply zoom and frame rate on new camera
             self.applyZoomNow()
+            self.applyFrameRateNow()
         }
     }
 

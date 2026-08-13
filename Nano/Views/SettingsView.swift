@@ -6,9 +6,11 @@ struct SettingsView: View {
 
     @AppStorage("photoMegapixels") private var photoMegapixels: Int = 12
     @AppStorage("videoQuality") private var videoQuality: String = "1080p"
+    @AppStorage("videoFPS") private var videoFPS: Int = 30
 
     private let megapixelOptions = [8, 12, 24, 48]
     private let videoQualityOptions = ["480p", "720p", "1080p", "4K"]
+    private let fpsOptions = [30, 60, 90, 120]
     private let zoomOptions = [1, 2, 3]
 
     var body: some View {
@@ -120,24 +122,48 @@ struct SettingsView: View {
                     // Video Settings
                     if settings.captureMode == .video {
                         settingsSection(title: "Vidéo") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Qualité")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color.white.opacity(0.6))
+                            VStack(alignment: .leading, spacing: 20) {
+                                // Qualité
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Qualité")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color.white.opacity(0.6))
 
-                                HStack(spacing: 0) {
-                                    ForEach(videoQualityOptions, id: \.self) { quality in
-                                        optionButton(
-                                            label: quality,
-                                            isSelected: videoQuality == quality,
-                                            action: {
-                                                videoQuality = quality
-                                                cameraManager.updateVideoQuality(quality)
-                                            }
-                                        )
+                                    HStack(spacing: 0) {
+                                        ForEach(videoQualityOptions, id: \.self) { quality in
+                                            optionButton(
+                                                label: quality,
+                                                isSelected: videoQuality == quality,
+                                                action: {
+                                                    videoQuality = quality
+                                                    cameraManager.updateVideoQuality(quality)
+                                                }
+                                            )
+                                        }
                                     }
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                // FPS
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Images par seconde (FPS)")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color.white.opacity(0.6))
+
+                                    HStack(spacing: 0) {
+                                        ForEach(fpsOptions, id: \.self) { fps in
+                                            optionButton(
+                                                label: "\(fps)",
+                                                isSelected: videoFPS == fps,
+                                                action: {
+                                                    videoFPS = fps
+                                                    cameraManager.updateVideoFPS(fps)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
                             }
                         }
                     }
