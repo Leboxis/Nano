@@ -11,11 +11,15 @@ struct ItemFramePreferenceKey: PreferenceKey {
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
 
-    @State private var isSelecting = false
+    @Binding var isSelecting: Bool
     @State private var selectedIds: Set<UUID> = []
     @State private var previewItem: MediaItem? = nil
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var startRow: Int? = nil
+
+    init(isSelecting: Binding<Bool> = .constant(false)) {
+        self._isSelecting = isSelecting
+    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -78,38 +82,43 @@ struct GalleryView: View {
 
                                         // Find index of item under finger
                                         if let matchedIndex = galleryStore.items.firstIndex(where: { itemFrames[$0.id]?.contains(loc) == true }) {
+                                            let matchedItem = galleryStore.items[matchedIndex]
                                             let currentRow = matchedIndex / 3
 
                                             if startRow == nil {
                                                 startRow = currentRow
-                                            }
+                                                // On initial touch, select ONLY the touched item, NOT the whole row
+                                                selectedIds.insert(matchedItem.id)
+                                            } else if currentRow != startRow {
+                                                // When finger moves to an adjacent/new row, select ALL items in that new row and intermediate rows
+                                                let initialRow = startRow!
+                                                let fromRow = min(initialRow, currentRow)
+                                                let toRow = max(initialRow, currentRow)
 
-                                            let fromRow = min(startRow ?? currentRow, currentRow)
-                                            let toRow = max(startRow ?? currentRow, currentRow)
-
-                                            // Select all items in all rows from fromRow to toRow
-                                            for r in fromRow...toRow {
-                                                let firstInRow = r * 3
-                                                let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
-                                                if firstInRow <= lastInRow {
-                                                    for i in firstInRow...lastInRow {
-                                                        selectedIds.insert(galleryStore.items[i].id)
+                                                for r in fromRow...toRow {
+                                                    let firstInRow = r * 3
+                                                    let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
+                                                    if firstInRow <= lastInRow {
+                                                        for i in firstInRow...lastInRow {
+                                                            selectedIds.insert(galleryStore.items[i].id)
+                                                        }
                                                     }
                                                 }
+                                            } else {
+                                                // Same row as start: select individual item touched
+                                                selectedIds.insert(matchedItem.id)
                                             }
                                         }
 
-                                        // Auto-scroll when near top or bottom edges
+                                        // Edge Auto-scroll
                                         let containerH = outerGeo.size.height
                                         if loc.y < 80 {
-                                            // Near top edge -> scroll toward top
                                             if let firstId = galleryStore.items.first?.id {
                                                 withAnimation(.linear(duration: 0.15)) {
                                                     scrollProxy.scrollTo(firstId, anchor: .top)
                                                 }
                                             }
                                         } else if loc.y > containerH - 80 {
-                                            // Near bottom edge -> scroll toward bottom
                                             if let lastId = galleryStore.items.last?.id {
                                                 withAnimation(.linear(duration: 0.15)) {
                                                     scrollProxy.scrollTo(lastId, anchor: .bottom)

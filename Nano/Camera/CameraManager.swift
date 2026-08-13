@@ -20,8 +20,7 @@ class CameraManager: NSObject, ObservableObject {
 
     weak var galleryStore: GalleryStore?
 
-    // Burst
-    private var burstTimer: Timer?
+    // Native Burst
     private var isBursting = false
 
     override init() {
@@ -395,32 +394,6 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Haptics
-
-    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
-        guard vibrationsEnabled else { return }
-        DispatchQueue.main.async {
-            let generator = UIImpactFeedbackGenerator(style: style)
-            generator.prepare()
-            generator.impactOccurred()
-
-            // Trigger physical hardware vibration motor
-            AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
-            AudioServicesPlaySystemSound(1520)
-        }
-    }
-
-    private func hapticBurst(count: Int, style: UIImpactFeedbackGenerator.FeedbackStyle, interval: TimeInterval) {
-        guard vibrationsEnabled else { return }
-        DispatchQueue.main.async { [weak self] in
-            for i in 0..<count {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * interval) {
-                    self?.haptic(style)
-                }
-            }
-        }
-    }
-
     // MARK: - Photo Capture
 
     func capturePhoto() {
@@ -429,7 +402,9 @@ class CameraManager: NSObject, ObservableObject {
             return
         }
 
-        haptic(.medium)
+        if vibrationsEnabled {
+            HapticManager.shared.playTap()
+        }
 
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
@@ -444,9 +419,14 @@ class CameraManager: NSObject, ObservableObject {
                 settings.maxPhotoDimensions = CMVideoDimensions(width: targetWidth, height: targetHeight)
             }
 
-            if let connection = photoOutput.connection(with: .video), connection.isVideoMirroringSupported {
-                connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = self.useFrontCamera
+            if let connection = photoOutput.connection(with: .video) {
+                if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
+                if connection.isVideoMirroringSupported {
+                    connection.automaticallyAdjustsVideoMirroring = false
+                    connection.isVideoMirrored = self.useFrontCamera
+                }
             }
 
             photoOutput.capturePhoto(with: settings, delegate: self)
@@ -463,25 +443,46 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Burst Capture
+    // MARK: - Native Hardware Burst Capture
 
     func startBurst() {
         guard !isBursting else { return }
         isBursting = true
 
-        DispatchQueue.main.async { [weak self] in
-            self?.burstTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-                self?.capturePhoto()
-            }
+        sessionQueue.async { [weak self] in
+            self?.captureNextBurstPhoto()
         }
     }
 
     func stopBurst() {
         isBursting = false
-        DispatchQueue.main.async { [weak self] in
-            self?.burstTimer?.invalidate()
-            self?.burstTimer = nil
+        if vibrationsEnabled {
+            HapticManager.shared.playBurstStop()
         }
+    }
+
+    private func captureNextBurstPhoto() {
+        guard isBursting, let photoOutput = photoOutput else { return }
+
+        if vibrationsEnabled {
+            HapticManager.shared.playTap()
+        }
+
+        let settings = AVCapturePhotoSettings()
+        // Speed quality prioritization enables native hardware burst mode
+        settings.photoQualityPrioritization = .speed
+
+        if let connection = photoOutput.connection(with: .video) {
+            if connection.isVideoOrientationSupported {
+                connection.videoOrientation = .portrait
+            }
+            if connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = self.useFrontCamera
+            }
+        }
+
+        photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
     // MARK: - Video Recording
@@ -489,7 +490,9 @@ class CameraManager: NSObject, ObservableObject {
     func startRecording() {
         guard let movieOutput = movieOutput, !isRecording else { return }
 
-        haptic(.heavy)
+        if vibrationsEnabled {
+            HapticManager.shared.playHeavy()
+        }
 
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
@@ -502,6 +505,9 @@ class CameraManager: NSObject, ObservableObject {
             }
 
             if let connection = movieOutput.connection(with: .video) {
+                if connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
                 if connection.isVideoMirroringSupported {
                     connection.automaticallyAdjustsVideoMirroring = false
                     connection.isVideoMirrored = self.useFrontCamera
@@ -533,22 +539,22 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      error: Error?) {
         if let error = error {
             print("CameraManager: Photo capture error: \(error)")
-            return
+        } else if var data = photo.fileDataRepresentation() {
+            // If front camera, physically flip JPEG image data horizontally (left-right)
+            if useFrontCamera, let image = UIImage(data: data) {
+                if let mirroredImage = flipImageHorizontally(image), let jpegData = mirroredImage.jpegData(compressionQuality: 0.95) {
+                    data = jpegData
+                }
+            }
+            galleryStore?.savePhoto(data: data)
         }
 
-        guard var data = photo.fileDataRepresentation() else {
-            print("CameraManager: No photo data")
-            return
-        }
-
-        // If front camera, physically flip JPEG image data horizontally (left-right)
-        if useFrontCamera, let image = UIImage(data: data) {
-            if let mirroredImage = flipImageHorizontally(image), let jpegData = mirroredImage.jpegData(compressionQuality: 0.95) {
-                data = jpegData
+        // If native burst is active, trigger next hardware frame immediately
+        if isBursting {
+            sessionQueue.async { [weak self] in
+                self?.captureNextBurstPhoto()
             }
         }
-
-        galleryStore?.savePhoto(data: data)
     }
 
     private func flipImageHorizontally(_ image: UIImage) -> UIImage? {
@@ -591,8 +597,9 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.isRecording = false
 
-            // 4 rapid vibrations to signal recording stopped
-            self?.hapticBurst(count: 4, style: .heavy, interval: 0.15)
+            if self?.vibrationsEnabled == true {
+                HapticManager.shared.playBurstStop()
+            }
         }
 
         if let error = error {
