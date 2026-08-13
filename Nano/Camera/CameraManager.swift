@@ -167,11 +167,9 @@ class CameraManager: NSObject, ObservableObject {
             session.commitConfiguration()
             self.captureSession = session
 
-            // Apply zoom, photo format & video format/FPS after session configuration
+            // Apply zoom & video format/FPS after session configuration
             self.applyZoomNow()
-            if self.captureMode == .photo {
-                self.applyCameraFormatForMegapixels()
-            } else {
+            if self.captureMode == .video {
                 self.applyVideoFormatAndFPS()
             }
         }
@@ -206,9 +204,7 @@ class CameraManager: NSObject, ObservableObject {
     private func applySessionPreset(session: AVCaptureSession) {
         switch captureMode {
         case .photo:
-            if session.canSetSessionPreset(.inputPriority) {
-                session.sessionPreset = .inputPriority
-            } else if session.canSetSessionPreset(.photo) {
+            if session.canSetSessionPreset(.photo) {
                 session.sessionPreset = .photo
             }
         case .video:
@@ -228,43 +224,6 @@ class CameraManager: NSObject, ObservableObject {
         case "1080p": return .hd1920x1080
         case "4K": return .hd4K3840x2160
         default: return .hd4K3840x2160
-        }
-    }
-
-    private func applyCameraFormatForMegapixels() {
-        guard captureMode == .photo, let camera = currentCamera, let session = captureSession else { return }
-        let mp = self.photoMegapixels
-        let targetWidth: Int32 = Int32(photoDimensionsForMP(mp).width)
-
-        do {
-            try camera.lockForConfiguration()
-
-            var bestFormat: AVCaptureDevice.Format?
-            var maxFoundWidth: Int32 = 0
-
-            for format in camera.formats {
-                let dims = format.highResolutionStillImageDimensions
-                if dims.width > maxFoundWidth {
-                    maxFoundWidth = dims.width
-                    bestFormat = format
-                }
-                if dims.width >= targetWidth {
-                    bestFormat = format
-                    break
-                }
-            }
-
-            if let format = bestFormat {
-                if session.canSetSessionPreset(.inputPriority) {
-                    session.sessionPreset = .inputPriority
-                }
-                camera.activeFormat = format
-                print("CameraManager: Unlocked camera format for \(mp) MP (width: \(maxFoundWidth))")
-            }
-
-            camera.unlockForConfiguration()
-        } catch {
-            print("CameraManager: Failed to configure camera format for Megapixels: \(error)")
         }
     }
 
@@ -342,9 +301,7 @@ class CameraManager: NSObject, ObservableObject {
             session.beginConfiguration()
             self.applySessionPreset(session: session)
             session.commitConfiguration()
-            if mode == .photo {
-                self.applyCameraFormatForMegapixels()
-            } else {
+            if mode == .video {
                 self.applyVideoFormatAndFPS()
             }
         }
@@ -375,9 +332,6 @@ class CameraManager: NSObject, ObservableObject {
 
     func updateMegapixels(_ mp: Int) {
         defaults.set(mp, forKey: "photoMegapixels")
-        sessionQueue.async { [weak self] in
-            self?.applyCameraFormatForMegapixels()
-        }
     }
 
     func refreshConfiguration() {
@@ -386,9 +340,7 @@ class CameraManager: NSObject, ObservableObject {
             session.beginConfiguration()
             self.applySessionPreset(session: session)
             session.commitConfiguration()
-            if self.captureMode == .photo {
-                self.applyCameraFormatForMegapixels()
-            } else {
+            if self.captureMode == .video {
                 self.applyVideoFormatAndFPS()
             }
         }
@@ -455,9 +407,7 @@ class CameraManager: NSObject, ObservableObject {
             session.commitConfiguration()
 
             self.applyZoomNow()
-            if self.captureMode == .photo {
-                self.applyCameraFormatForMegapixels()
-            } else {
+            if self.captureMode == .video {
                 self.applyVideoFormatAndFPS()
             }
         }
@@ -519,15 +469,6 @@ class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings()
             }
 
-            // Set photo dimensions according to Megapixels setting (8, 12, 24, 48 MP)
-            let dims = self.photoDimensionsForMP(self.photoMegapixels)
-            if #available(iOS 16.0, *) {
-                let maxDims = photoOutput.maxPhotoDimensions
-                let w = min(dims.width, maxDims.width)
-                let h = min(dims.height, maxDims.height)
-                settings.maxPhotoDimensions = CMVideoDimensions(width: w, height: h)
-            }
-
             // Configure native AVFoundation photo mirroring for front camera
             if let connection = photoOutput.connection(with: .video) {
                 if connection.isVideoOrientationSupported {
@@ -540,16 +481,6 @@ class CameraManager: NSObject, ObservableObject {
             }
 
             photoOutput.capturePhoto(with: settings, delegate: self)
-        }
-    }
-
-    private func photoDimensionsForMP(_ mp: Int) -> CMVideoDimensions {
-        switch mp {
-        case 8: return CMVideoDimensions(width: 3264, height: 2448)
-        case 12: return CMVideoDimensions(width: 4032, height: 3024)
-        case 24: return CMVideoDimensions(width: 5712, height: 4284)
-        case 48: return CMVideoDimensions(width: 8064, height: 6048)
-        default: return CMVideoDimensions(width: 5712, height: 4284)
         }
     }
 
