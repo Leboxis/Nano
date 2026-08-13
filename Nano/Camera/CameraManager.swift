@@ -1,6 +1,7 @@
 import AVFoundation
 import UIKit
 import SwiftUI
+import AudioToolbox
 
 class CameraManager: NSObject, ObservableObject {
     @Published var isRecording = false
@@ -229,7 +230,6 @@ class CameraManager: NSObject, ObservableObject {
 
     func updateMegapixels(_ mp: Int) {
         defaults.set(mp, forKey: "photoMegapixels")
-        // Resolution is applied at capture time, no session change needed
     }
 
     func refreshConfiguration() {
@@ -312,18 +312,32 @@ class CameraManager: NSObject, ObservableObject {
 
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         guard vibrationsEnabled else { return }
-        let generator = UIImpactFeedbackGenerator(style: style)
-        generator.prepare()
-        generator.impactOccurred()
+        DispatchQueue.main.async {
+            let generator = UIImpactFeedbackGenerator(style: style)
+            generator.prepare()
+            generator.impactOccurred()
+
+            // Fallback system vibration sound IDs for guaranteed tactile feedback
+            switch style {
+            case .light:
+                AudioServicesPlaySystemSound(1519)
+            case .medium:
+                AudioServicesPlaySystemSound(1520)
+            case .heavy:
+                AudioServicesPlaySystemSound(1521)
+            @unknown default:
+                AudioServicesPlaySystemSound(1520)
+            }
+        }
     }
 
     private func hapticBurst(count: Int, style: UIImpactFeedbackGenerator.FeedbackStyle, interval: TimeInterval) {
         guard vibrationsEnabled else { return }
-        let generator = UIImpactFeedbackGenerator(style: style)
-        generator.prepare()
-        for i in 0..<count {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * interval) {
-                generator.impactOccurred()
+        DispatchQueue.main.async { [weak self] in
+            for i in 0..<count {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * interval) {
+                    self?.haptic(style)
+                }
             }
         }
     }
@@ -336,10 +350,8 @@ class CameraManager: NSObject, ObservableObject {
             return
         }
 
-        // Haptic feedback on main thread FIRST (so user feels it immediately)
-        DispatchQueue.main.async { [weak self] in
-            self?.haptic(.medium)
-        }
+        // Haptic feedback
+        haptic(.medium)
 
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
@@ -353,6 +365,11 @@ class CameraManager: NSObject, ObservableObject {
                 let targetWidth = min(dims.width, supportedDims.width)
                 let targetHeight = min(dims.height, supportedDims.height)
                 settings.maxPhotoDimensions = CMVideoDimensions(width: targetWidth, height: targetHeight)
+            }
+
+            // Mirror photo if using front camera
+            if let connection = photoOutput.connection(with: .video), connection.isVideoMirroringSupported {
+                connection.isVideoMirrored = self.useFrontCamera
             }
 
             photoOutput.capturePhoto(with: settings, delegate: self)
@@ -396,9 +413,7 @@ class CameraManager: NSObject, ObservableObject {
         guard let movieOutput = movieOutput, !isRecording else { return }
 
         // Single vibration to signal recording started
-        DispatchQueue.main.async { [weak self] in
-            self?.haptic(.heavy)
-        }
+        haptic(.heavy)
 
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
@@ -408,6 +423,11 @@ class CameraManager: NSObject, ObservableObject {
 
             if FileManager.default.fileExists(atPath: outputURL.path) {
                 try? FileManager.default.removeItem(at: outputURL)
+            }
+
+            // Mirror video if using front camera
+            if let connection = movieOutput.connection(with: .video), connection.isVideoMirroringSupported {
+                connection.isVideoMirrored = self.useFrontCamera
             }
 
             movieOutput.startRecording(to: outputURL, recordingDelegate: self)
@@ -438,12 +458,30 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        guard let data = photo.fileDataRepresentation() else {
+        guard var data = photo.fileDataRepresentation() else {
             print("CameraManager: No photo data")
             return
         }
 
+        // If front camera, physically mirror image data if needed
+        if useFrontCamera, let image = UIImage(data: data) {
+            if let mirroredImage = flipImageHorizontally(image), let jpegData = mirroredImage.jpegData(compressionQuality: 0.95) {
+                data = jpegData
+            }
+        }
+
         galleryStore?.savePhoto(data: data)
+    }
+
+    private func flipImageHorizontally(_ image: UIImage) -> UIImage? {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        return renderer.image { context in
+            context.cgContext.translateBy(x: image.size.width, y: 0)
+            context.cgContext.scaleBy(x: -1.0, y: 1.0)
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
     }
 }
 
