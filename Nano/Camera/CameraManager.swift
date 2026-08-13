@@ -243,17 +243,15 @@ class CameraManager: NSObject, ObservableObject {
             var maxFoundWidth: Int32 = 0
 
             for format in camera.formats {
-                for dims in format.highResolutionStillImageDimensions {
-                    if dims.width > maxFoundWidth {
-                        maxFoundWidth = dims.width
-                        bestFormat = format
-                    }
-                    if dims.width >= targetWidth {
-                        bestFormat = format
-                        break
-                    }
+                let dims = format.highResolutionStillImageDimensions
+                if dims.width > maxFoundWidth {
+                    maxFoundWidth = dims.width
+                    bestFormat = format
                 }
-                if bestFormat != nil && maxFoundWidth >= targetWidth { break }
+                if dims.width >= targetWidth {
+                    bestFormat = format
+                    break
+                }
             }
 
             if let format = bestFormat {
