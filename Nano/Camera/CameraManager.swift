@@ -150,9 +150,6 @@ class CameraManager: NSObject, ObservableObject {
 
             // Photo output
             let photoOut = AVCapturePhotoOutput()
-            if #available(iOS 13.0, *) {
-                photoOut.isSmartHDREnabled = false // Disable Apple's Smart HDR computational enhancement
-            }
             if session.canAddOutput(photoOut) {
                 session.addOutput(photoOut)
                 self.photoOutput = photoOut
