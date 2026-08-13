@@ -150,8 +150,9 @@ class CameraManager: NSObject, ObservableObject {
                 }
             }
 
-            // Photo output
+            // Photo output with maximum 48 MP high-resolution capture support
             let photoOut = AVCapturePhotoOutput()
+            photoOut.isHighResolutionCaptureEnabled = true
             if session.canAddOutput(photoOut) {
                 session.addOutput(photoOut)
                 self.photoOutput = photoOut
@@ -444,7 +445,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Photo Capture (Native HEIC, Full Pixel Resolution 9:16)
+    // MARK: - Photo Capture (Native HEIC, Full Sensor Megapixel 9:16)
 
     func capturePhoto() {
         guard let photoOutput = photoOutput else {
@@ -464,14 +465,12 @@ class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings()
             }
 
+            settings.isHighResolutionPhotoEnabled = true
             settings.photoQualityPrioritization = .balanced
 
-            let dims = self.photoDimensionsForMP(self.photoMegapixels)
             if #available(iOS 16.0, *) {
                 let supportedDims = photoOutput.maxPhotoDimensions
-                let targetWidth = min(dims.width, supportedDims.width)
-                let targetHeight = min(dims.height, supportedDims.height)
-                settings.maxPhotoDimensions = CMVideoDimensions(width: targetWidth, height: targetHeight)
+                settings.maxPhotoDimensions = supportedDims
             }
 
             if let connection = photoOutput.connection(with: .video) {
@@ -485,16 +484,6 @@ class CameraManager: NSObject, ObservableObject {
             }
 
             photoOutput.capturePhoto(with: settings, delegate: self)
-        }
-    }
-
-    private func photoDimensionsForMP(_ mp: Int) -> CMVideoDimensions {
-        switch mp {
-        case 8: return CMVideoDimensions(width: 3264, height: 2448)
-        case 12: return CMVideoDimensions(width: 4032, height: 3024)
-        case 24: return CMVideoDimensions(width: 5712, height: 4284)
-        case 48: return CMVideoDimensions(width: 8064, height: 6048)
-        default: return CMVideoDimensions(width: 5712, height: 4284)
         }
     }
 
@@ -638,7 +627,7 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         let croppedCI = orientedCI.cropped(to: cropRect)
 
-        // 3. Render cropped CIImage to CGImage using CIContext
+        // 3. Render cropped CIImage to CGImage using CIContext at maximum resolution
         let context = CIContext()
         guard let cgImage = context.createCGImage(croppedCI, from: croppedCI.extent) else {
             return rawData
@@ -658,22 +647,6 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         }
 
         return rawData
-    }
-
-    private func exportToHEIC(image: UIImage, compressionQuality: CGFloat = 0.95) -> Data? {
-        guard let cgImage = image.cgImage else { return nil }
-        let mutableData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(mutableData, UTType.heic.identifier as CFString, 1, nil) else {
-            return nil
-        }
-        let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: compressionQuality
-        ]
-        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
-        if CGImageDestinationFinalize(destination) {
-            return mutableData as Data
-        }
-        return nil
     }
 }
 
