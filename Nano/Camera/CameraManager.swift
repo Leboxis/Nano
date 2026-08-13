@@ -151,7 +151,6 @@ class CameraManager: NSObject, ObservableObject {
 
             // Photo output
             let photoOut = AVCapturePhotoOutput()
-            photoOut.isHighResolutionCaptureEnabled = true
             if session.canAddOutput(photoOut) {
                 session.addOutput(photoOut)
                 self.photoOutput = photoOut
@@ -463,8 +462,6 @@ class CameraManager: NSObject, ObservableObject {
             } else {
                 settings = AVCapturePhotoSettings()
             }
-
-            settings.isHighResolutionPhotoEnabled = true
 
             // Set photo dimensions according to Megapixels setting (8, 12, 24, 48 MP)
             let dims = self.photoDimensionsForMP(self.photoMegapixels)

@@ -661,13 +661,15 @@ struct InteractiveVideoPlayerView: View {
                         // Time Labels
                         HStack {
                             Text(formatTime(currentTime))
-                                .font(.system(size: 12, weight: .monospacedDigit))
+                                .font(.system(size: 12, weight: .regular))
+                                .monospacedDigit()
                                 .foregroundColor(Color.white.opacity(0.8))
 
                             Spacer()
 
                             Text(formatTime(duration))
-                                .font(.system(size: 12, weight: .monospacedDigit))
+                                .font(.system(size: 12, weight: .regular))
+                                .monospacedDigit()
                                 .foregroundColor(Color.white.opacity(0.8))
                         }
                     }
