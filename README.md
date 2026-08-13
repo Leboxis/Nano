@@ -1,0 +1,69 @@
+# Nano 📷
+
+Ultra-minimal stealth camera app for iOS.
+
+## Features
+
+- **Black screen** — No visible camera UI, just a pitch-black screen
+- **Tap** — Take a photo (photo mode) or start/stop recording (video mode)
+- **Long press** — Burst photo capture
+- **Swipe left** — Private gallery with multi-selection & export
+- **Swipe right** — Settings (megapixels, video quality, capture mode)
+- **Auto-dim** — Screen brightness set to minimum on launch
+- **Haptic feedback** — Vibration on video stop, light tap on photo capture
+- **Private storage** — All media stored within the app sandbox (invisible to Photos.app)
+- **Remembers last mode** — Opens in the last used capture mode
+
+## Installation (Sideloading)
+
+1. Download `Nano.ipa` from [GitHub Actions](../../actions) → Artifacts
+2. Install using [AltStore](https://altstore.io/) or [Sideloadly](https://sideloadly.io/)
+3. Trust the developer profile in **Settings → General → VPN & Device Management**
+
+## Build Locally
+
+Requires macOS with Xcode 15+ and XcodeGen:
+
+```bash
+brew install xcodegen
+xcodegen generate
+open Nano.xcodeproj
+```
+
+## Tech Stack
+
+- SwiftUI + AVFoundation
+- iOS 16+
+- iPhone only (portrait)
+- No external dependencies
+- XcodeGen for project generation
+
+## Project Structure
+
+```
+Nano/
+├── Nano/
+│   ├── App/
+│   │   ├── NanoApp.swift        # Entry point, brightness control
+│   │   └── ContentView.swift    # Page navigation (3 swipeable pages)
+│   ├── Views/
+│   │   ├── CameraView.swift     # Black screen + tap/long press gestures
+│   │   ├── SettingsView.swift   # Mode, MP, video quality settings
+│   │   └── GalleryView.swift    # Private gallery with selection & export
+│   ├── Camera/
+│   │   └── CameraManager.swift  # AVFoundation session management
+│   ├── Models/
+│   │   ├── MediaItem.swift      # Photo/video data model
+│   │   └── AppSettings.swift    # UserDefaults persistence
+│   ├── Services/
+│   │   └── GalleryStore.swift   # File storage & thumbnail generation
+│   ├── Assets.xcassets/
+│   └── Info.plist
+├── project.yml                  # XcodeGen spec
+└── .github/workflows/
+    └── build-ipa.yml            # CI/CD → unsigned IPA
+```
+
+## License
+
+Private project — All rights reserved.

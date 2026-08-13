@@ -1,0 +1,62 @@
+name: Build Nano IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # Use the latest available Xcode
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            echo "No Xcode found, using default"
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using Xcode at: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build Archive
+        run: |
+          xcodebuild archive \
+            -project Nano.xcodeproj \
+            -scheme Nano \
+            -configuration Release \
+            -archivePath build/Nano.xcarchive \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            -allowProvisioningUpdates \
+            -quiet
+
+      - name: Create IPA
+        run: |
+          mkdir -p build/Payload
+          cp -r build/Nano.xcarchive/Products/Applications/Nano.app build/Payload/
+          cd build
+          zip -r Nano.ipa Payload/
+          rm -rf Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nano-IPA
+          path: build/Nano.ipa
+          retention-days: 90
