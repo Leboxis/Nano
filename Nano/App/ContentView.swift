@@ -8,10 +8,10 @@ struct ContentView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            GalleryView()
+            GalleryView(selectedTab: $selectedTab)
                 .tag(0)
 
-            CameraView()
+            CameraView(selectedTab: $selectedTab)
                 .tag(1)
 
             SettingsView()

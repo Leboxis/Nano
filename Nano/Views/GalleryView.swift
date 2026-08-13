@@ -12,12 +12,17 @@ struct ItemFramePreferenceKey: PreferenceKey {
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
 
+    @Binding var selectedTab: Int
     @State private var isSelecting = false
     @State private var selectedIds: Set<UUID> = []
     @State private var previewItem: MediaItem? = nil
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var startRow: Int? = nil
     @State private var isUnlocked = false
+
+    init(selectedTab: Binding<Int> = .constant(0)) {
+        self._selectedTab = selectedTab
+    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -41,6 +46,22 @@ struct GalleryView: View {
         .onAppear {
             if !isUnlocked {
                 authenticateWithFaceID()
+            }
+        }
+        .onDisappear {
+            // ALWAYS re-lock Face ID when leaving the Gallery tab!
+            isUnlocked = false
+        }
+        .onChange(of: selectedTab) { newTab in
+            if newTab != 0 {
+                // Re-lock when switching to Camera or Settings tab
+                isUnlocked = false
+                isSelecting = false
+                selectedIds.removeAll()
+            } else {
+                if !isUnlocked {
+                    authenticateWithFaceID()
+                }
             }
         }
         .statusBarHidden(true)
@@ -99,7 +120,6 @@ struct GalleryView: View {
                 }
             }
         } else {
-            // Passcode fallback if FaceID not enrolled or unavailable
             context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Déverrouiller la galerie privée") { success, _ in
                 DispatchQueue.main.async {
                     self.isUnlocked = success
@@ -153,8 +173,8 @@ struct GalleryView: View {
                 .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
                     self.itemFrames = frames
                 }
-                .simultaneousGesture(
-                    isSelecting ? DragGesture(minimumDistance: 10, coordinateSpace: .named("galleryScrollView"))
+                .highPriorityGesture(
+                    isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
                         .onChanged { gesture in
                             let loc = gesture.location
 
