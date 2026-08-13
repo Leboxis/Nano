@@ -397,16 +397,8 @@ class CameraManager: NSObject, ObservableObject {
             generator.prepare()
             generator.impactOccurred()
 
-            switch style {
-            case .light, .soft:
-                AudioServicesPlaySystemSound(1519)
-            case .medium, .rigid:
-                AudioServicesPlaySystemSound(1520)
-            case .heavy:
-                AudioServicesPlaySystemSound(1521)
-            @unknown default:
-                AudioServicesPlaySystemSound(1520)
-            }
+            // Direct hardware vibration motor trigger (kSystemSoundID_Vibrate = 4095/1352)
+            AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
         }
     }
 
@@ -554,14 +546,27 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
     }
 
     private func flipImageHorizontally(_ image: UIImage) -> UIImage? {
+        let mirroredOrientation: UIImage.Orientation
+        switch image.imageOrientation {
+        case .up: mirroredOrientation = .upMirrored
+        case .down: mirroredOrientation = .downMirrored
+        case .left: mirroredOrientation = .leftMirrored
+        case .right: mirroredOrientation = .rightMirrored
+        case .upMirrored: mirroredOrientation = .up
+        case .downMirrored: mirroredOrientation = .down
+        case .leftMirrored: mirroredOrientation = .left
+        case .rightMirrored: mirroredOrientation = .right
+        @unknown default: mirroredOrientation = .upMirrored
+        }
+
+        guard let cgImage = image.cgImage else { return nil }
+        let mirroredImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: mirroredOrientation)
         let format = UIGraphicsImageRendererFormat()
-        format.scale = image.scale
-        let size = image.size
+        format.scale = mirroredImage.scale
+        let size = mirroredImage.size
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        return renderer.image { context in
-            context.cgContext.translateBy(x: size.width, y: 0)
-            context.cgContext.scaleBy(x: -1.0, y: 1.0)
-            image.draw(in: CGRect(origin: .zero, size: size))
+        return renderer.image { _ in
+            mirroredImage.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

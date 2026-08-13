@@ -64,11 +64,12 @@ struct GalleryView: View {
                             }
                         }
                     }
+                    .scrollDisabled(isSelecting)
                     .coordinateSpace(name: "galleryScrollView")
                     .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
                         self.itemFrames = frames
                     }
-                    .gesture(
+                    .highPriorityGesture(
                         isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
                             .onChanged { gesture in
                                 let loc = gesture.location

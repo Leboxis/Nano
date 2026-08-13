@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 @main
 struct NanoApp: App {
@@ -15,6 +16,15 @@ struct NanoApp: App {
                 .environmentObject(settings)
                 .preferredColorScheme(.dark)
                 .onAppear {
+                    // Configure AVAudioSession to allow haptics/vibrations while camera & mic are active
+                    do {
+                        let audioSession = AVAudioSession.sharedInstance()
+                        try audioSession.setCategory(.playAndRecord, options: [.mixWithOthers, .defaultToSpeaker])
+                        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                    } catch {
+                        print("NanoApp: Failed to configure AVAudioSession: \(error)")
+                    }
+
                     // Link camera to gallery
                     cameraManager.galleryStore = galleryStore
                     cameraManager.updateMode(settings.captureMode)
