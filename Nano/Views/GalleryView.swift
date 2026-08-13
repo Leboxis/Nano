@@ -19,6 +19,7 @@ struct GalleryView: View {
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var startRow: Int? = nil
     @State private var isUnlocked = false
+    @State private var isAuthenticating = false
 
     init(selectedTab: Binding<Int> = .constant(0)) {
         self._selectedTab = selectedTab
@@ -47,14 +48,16 @@ struct GalleryView: View {
             triggerFaceIDAutoPrompt()
         }
         .onDisappear {
-            // ALWAYS re-lock Face ID when leaving the Gallery tab!
+            // ALWAYS re-lock Face ID when leaving the Gallery tab
             isUnlocked = false
+            isAuthenticating = false
         }
         .onChange(of: selectedTab) { newTab in
             if newTab != 0 {
                 // Re-lock when switching to Camera or Settings tab
                 isUnlocked = false
                 isSelecting = false
+                isAuthenticating = false
                 selectedIds.removeAll()
             } else {
                 triggerFaceIDAutoPrompt()
@@ -83,7 +86,9 @@ struct GalleryView: View {
                     .foregroundColor(Color.white.opacity(0.4))
             }
 
-            Button(action: authenticateWithFaceID) {
+            Button(action: {
+                authenticateWithFaceID()
+            }) {
                 HStack(spacing: 10) {
                     Image(systemName: "faceid")
                         .font(.system(size: 20))
@@ -105,29 +110,33 @@ struct GalleryView: View {
     }
 
     private func triggerFaceIDAutoPrompt() {
-        guard !isUnlocked else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            if self.selectedTab == 0 && !self.isUnlocked {
+        guard !isUnlocked && !isAuthenticating else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if self.selectedTab == 0 && !self.isUnlocked && !self.isAuthenticating {
                 self.authenticateWithFaceID()
             }
         }
     }
 
     private func authenticateWithFaceID() {
+        guard !isUnlocked && !isAuthenticating else { return }
+        isAuthenticating = true
+
         let context = LAContext()
         var error: NSError?
 
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
-            let reason = "Déverrouiller la galerie privée Nano"
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, _ in
-                DispatchQueue.main.async {
-                    self.isUnlocked = success
-                }
-            }
-        } else {
-            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Déverrouiller la galerie privée") { success, _ in
-                DispatchQueue.main.async {
-                    self.isUnlocked = success
+        let policy: LAPolicy = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+            ? .deviceOwnerAuthenticationWithBiometrics
+            : .deviceOwnerAuthentication
+
+        let reason = "Déverrouiller la galerie privée Nano"
+
+        context.evaluatePolicy(policy, localizedReason: reason) { success, error in
+            DispatchQueue.main.async {
+                self.isAuthenticating = false
+                self.isUnlocked = success
+                if let err = error {
+                    print("GalleryView: Face ID error: \(err.localizedDescription)")
                 }
             }
         }
