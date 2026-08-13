@@ -107,7 +107,7 @@ struct SettingsView: View {
                                             isSelected: photoMegapixels == mp,
                                             action: {
                                                 photoMegapixels = mp
-                                                cameraManager.refreshConfiguration()
+                                                cameraManager.updateMegapixels(mp)
                                             }
                                         )
                                     }
@@ -132,7 +132,7 @@ struct SettingsView: View {
                                             isSelected: videoQuality == quality,
                                             action: {
                                                 videoQuality = quality
-                                                cameraManager.refreshConfiguration()
+                                                cameraManager.updateVideoQuality(quality)
                                             }
                                         )
                                     }
