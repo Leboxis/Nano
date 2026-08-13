@@ -398,9 +398,9 @@ class CameraManager: NSObject, ObservableObject {
             generator.impactOccurred()
 
             switch style {
-            case .light:
+            case .light, .soft:
                 AudioServicesPlaySystemSound(1519)
-            case .medium:
+            case .medium, .rigid:
                 AudioServicesPlaySystemSound(1520)
             case .heavy:
                 AudioServicesPlaySystemSound(1521)
@@ -507,14 +507,6 @@ class CameraManager: NSObject, ObservableObject {
                 if connection.isVideoMirroringSupported {
                     connection.automaticallyAdjustsVideoMirroring = false
                     connection.isVideoMirrored = self.useFrontCamera
-                }
-                // Also set connection video frame rate if supported
-                let targetFPS = Double(self.videoFPS)
-                if connection.isVideoMinFrameDurationSupported {
-                    connection.videoMinFrameDuration = CMTime(value: 1, timescale: Int32(targetFPS))
-                }
-                if connection.isVideoMaxFrameDurationSupported {
-                    connection.videoMaxFrameDuration = CMTime(value: 1, timescale: Int32(targetFPS))
                 }
             }
 
