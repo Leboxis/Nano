@@ -638,26 +638,23 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         let croppedCI = orientedCI.cropped(to: cropRect)
 
-        // Encode to native HEIC directly via CoreImage CIContext at full pixel resolution
+        // 3. Render cropped CIImage to CGImage using CIContext
         let context = CIContext()
-        if #available(iOS 14.0, *) {
-            do {
-                let heicData = try context.heicRepresentation(
-                    of: croppedCI,
-                    format: .RGBA8,
-                    colorSpace: CGColorSpaceCreateDeviceRGB(),
-                    options: [CIImageRepresentationOption.heicEffectiveCompressionQuality: 0.95]
-                )
-                return heicData
-            } catch {
-                print("CameraManager: CoreImage HEIC export error: \(error)")
-            }
+        guard let cgImage = context.createCGImage(croppedCI, from: croppedCI.extent) else {
+            return rawData
         }
 
-        // Fallback HEIC export via CGImageDestination
-        if let cgImage = context.createCGImage(croppedCI, from: croppedCI.extent) {
-            let uiImage = UIImage(cgImage: cgImage)
-            return exportToHEIC(image: uiImage, compressionQuality: 0.95)
+        // 4. Encode CGImage to HEIC Data using CGImageDestination
+        let mutableData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(mutableData, UTType.heic.identifier as CFString, 1, nil) else {
+            return rawData
+        }
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 0.95
+        ]
+        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+        if CGImageDestinationFinalize(destination) {
+            return mutableData as Data
         }
 
         return rawData
