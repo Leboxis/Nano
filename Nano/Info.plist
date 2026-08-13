@@ -38,6 +38,8 @@
     <string>Nano a besoin d'accéder au microphone pour enregistrer le son des vidéos.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Nano peut exporter vos médias vers la photothèque.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>Nano utilise Face ID pour sécuriser l'accès à votre galerie privée.</string>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
     <key>UIStatusBarHidden</key>

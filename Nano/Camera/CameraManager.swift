@@ -150,6 +150,9 @@ class CameraManager: NSObject, ObservableObject {
 
             // Photo output
             let photoOut = AVCapturePhotoOutput()
+            if #available(iOS 13.0, *) {
+                photoOut.isSmartHDREnabled = false // Disable Apple's Smart HDR computational enhancement
+            }
             if session.canAddOutput(photoOut) {
                 session.addOutput(photoOut)
                 self.photoOutput = photoOut
@@ -415,7 +418,6 @@ class CameraManager: NSObject, ObservableObject {
             generator.prepare()
             generator.impactOccurred()
 
-            // Trigger system haptic audio sounds
             switch style {
             case .light, .soft:
                 AudioServicesPlaySystemSound(1519)
@@ -443,7 +445,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Photo Capture
+    // MARK: - Photo Capture (Native HEIC, 16:9, No Apple Image Enhancement)
 
     func capturePhoto() {
         guard let photoOutput = photoOutput else {
@@ -456,7 +458,16 @@ class CameraManager: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
 
-            let settings = AVCapturePhotoSettings()
+            // Configure Native HEIC format if available
+            let settings: AVCapturePhotoSettings
+            if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+            } else {
+                settings = AVCapturePhotoSettings()
+            }
+
+            // Disable Apple's Deep Fusion & Smart HDR computational post-processing by choosing .speed
+            settings.photoQualityPrioritization = .speed
 
             let dims = self.photoDimensionsForMP(self.photoMegapixels)
             if #available(iOS 16.0, *) {
@@ -466,7 +477,6 @@ class CameraManager: NSObject, ObservableObject {
                 settings.maxPhotoDimensions = CMVideoDimensions(width: targetWidth, height: targetHeight)
             }
 
-            // Configure native AVFoundation photo mirroring for front camera (identical to video)
             if let connection = photoOutput.connection(with: .video) {
                 if connection.isVideoOrientationSupported {
                     connection.videoOrientation = .portrait
@@ -512,7 +522,12 @@ class CameraManager: NSObject, ObservableObject {
 
         triggerHaptic(.light)
 
-        let settings = AVCapturePhotoSettings()
+        let settings: AVCapturePhotoSettings
+        if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+        } else {
+            settings = AVCapturePhotoSettings()
+        }
         settings.photoQualityPrioritization = .speed
 
         if let connection = photoOutput.connection(with: .video) {
@@ -580,9 +595,12 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      error: Error?) {
         if let error = error {
             print("CameraManager: Photo capture error: \(error)")
-        } else if let data = photo.fileDataRepresentation() {
-            // Natively mirrored photo saved directly
-            galleryStore?.savePhoto(data: data)
+        } else if let rawData = photo.fileDataRepresentation(), let image = UIImage(data: rawData) {
+            // Crop image to 16:9 ratio in raw unenhanced state
+            let croppedImage = cropTo16By9(image) ?? image
+            let finalData = croppedImage.jpegData(compressionQuality: 0.95) ?? rawData
+
+            galleryStore?.savePhoto(data: finalData)
         }
 
         // If native burst is active, trigger next frame immediately
@@ -591,6 +609,28 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                 self?.captureNextBurstPhoto()
             }
         }
+    }
+
+    private func cropTo16By9(_ image: UIImage) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+
+        // In portrait orientation: 9:16 aspect ratio (width: height = 9:16 -> targetHeight = width * 16 / 9)
+        let targetHeight = width * (16.0 / 9.0)
+
+        let cropRect: CGRect
+        if targetHeight <= height {
+            let offsetY = (height - targetHeight) / 2.0
+            cropRect = CGRect(x: 0, y: offsetY, width: width, height: targetHeight)
+        } else {
+            let targetWidth = height * (9.0 / 16.0)
+            let offsetX = (width - targetWidth) / 2.0
+            cropRect = CGRect(x: offsetX, y: 0, width: targetWidth, height: height)
+        }
+
+        guard let croppedCG = cgImage.cropping(to: cropRect) else { return nil }
+        return UIImage(cgImage: croppedCG, scale: image.scale, orientation: image.imageOrientation)
     }
 }
 

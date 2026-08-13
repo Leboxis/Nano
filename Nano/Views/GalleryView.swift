@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import LocalAuthentication
 
 struct ItemFramePreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
@@ -16,6 +17,7 @@ struct GalleryView: View {
     @State private var previewItem: MediaItem? = nil
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var startRow: Int? = nil
+    @State private var isUnlocked = false
 
     init(isSelecting: Binding<Bool> = .constant(false)) {
         self._isSelecting = isSelecting
@@ -31,98 +33,172 @@ struct GalleryView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Header
-                header
-                    .padding(.top, 56)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-
-                if galleryStore.items.isEmpty {
-                    emptyState
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 2) {
-                            ForEach(Array(galleryStore.items.enumerated()), id: \.element.id) { index, item in
-                                ThumbnailCell(
-                                    item: item,
-                                    isSelecting: isSelecting,
-                                    isSelected: selectedIds.contains(item.id),
-                                    galleryStore: galleryStore
-                                )
-                                .id(item.id)
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: ItemFramePreferenceKey.self,
-                                            value: [item.id: geo.frame(in: .named("galleryScrollView"))]
-                                        )
-                                    }
-                                )
-                                .onTapGesture {
-                                    if isSelecting {
-                                        toggleSelection(item.id)
-                                    } else {
-                                        previewItem = item
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .coordinateSpace(name: "galleryScrollView")
-                    .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
-                        self.itemFrames = frames
-                    }
-                    .simultaneousGesture(
-                        isSelecting ? DragGesture(minimumDistance: 10, coordinateSpace: .named("galleryScrollView"))
-                            .onChanged { gesture in
-                                let loc = gesture.location
-
-                                if let matchedIndex = galleryStore.items.firstIndex(where: { itemFrames[$0.id]?.contains(loc) == true }) {
-                                    let matchedItem = galleryStore.items[matchedIndex]
-                                    let currentRow = matchedIndex / 3
-
-                                    if startRow == nil {
-                                        startRow = currentRow
-                                        // Select only single touched item in initial row
-                                        selectedIds.insert(matchedItem.id)
-                                    } else if currentRow != startRow {
-                                        // Moving to adjacent or new row: select all items in new rows
-                                        let initialRow = startRow!
-                                        let fromRow = min(initialRow, currentRow)
-                                        let toRow = max(initialRow, currentRow)
-
-                                        for r in fromRow...toRow {
-                                            let firstInRow = r * 3
-                                            let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
-                                            if firstInRow <= lastInRow {
-                                                for i in firstInRow...lastInRow {
-                                                    selectedIds.insert(galleryStore.items[i].id)
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        // Same row: select touched item
-                                        selectedIds.insert(matchedItem.id)
-                                    }
-                                }
-                            }
-                            .onEnded { _ in
-                                startRow = nil
-                            } : nil
-                    )
-
-                    // Selection toolbar
-                    if isSelecting {
-                        selectionToolbar
-                    }
-                }
+            if isUnlocked {
+                unlockedContent
+            } else {
+                lockedState
             }
         }
         .fullScreenCover(item: $previewItem) { item in
             MediaPreviewView(item: item, galleryStore: galleryStore)
         }
+        .onAppear {
+            if !isUnlocked {
+                authenticateWithFaceID()
+            }
+        }
         .statusBarHidden(true)
+    }
+
+    // MARK: - Locked View (Face ID Protection)
+
+    private var lockedState: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 64, weight: .thin))
+                .foregroundColor(Color.white.opacity(0.4))
+
+            VStack(spacing: 8) {
+                Text("Galerie Privée")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+
+                Text("Accès sécurisé par Face ID")
+                    .font(.system(size: 14))
+                    .foregroundColor(Color.white.opacity(0.4))
+            }
+
+            Button(action: authenticateWithFaceID) {
+                HStack(spacing: 10) {
+                    Image(systemName: "faceid")
+                        .font(.system(size: 20))
+                    Text("Déverrouiller avec Face ID")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundColor(.black)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .background(
+                    Capsule()
+                        .fill(Color.white)
+                )
+            }
+            .padding(.top, 12)
+
+            Spacer()
+        }
+    }
+
+    private func authenticateWithFaceID() {
+        let context = LAContext()
+        var error: NSError?
+
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            let reason = "Déverrouiller la galerie privée Nano"
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, _ in
+                DispatchQueue.main.async {
+                    self.isUnlocked = success
+                }
+            }
+        } else {
+            // Passcode fallback if FaceID not enrolled or unavailable
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Déverrouiller la galerie privée") { success, _ in
+                DispatchQueue.main.async {
+                    self.isUnlocked = success
+                }
+            }
+        }
+    }
+
+    // MARK: - Unlocked Content
+
+    private var unlockedContent: some View {
+        VStack(spacing: 0) {
+            // Header
+            header
+                .padding(.top, 56)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+            if galleryStore.items.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 2) {
+                        ForEach(Array(galleryStore.items.enumerated()), id: \.element.id) { index, item in
+                            ThumbnailCell(
+                                item: item,
+                                isSelecting: isSelecting,
+                                isSelected: selectedIds.contains(item.id),
+                                galleryStore: galleryStore
+                            )
+                            .id(item.id)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: ItemFramePreferenceKey.self,
+                                        value: [item.id: geo.frame(in: .named("galleryScrollView"))]
+                                    )
+                                }
+                            )
+                            .onTapGesture {
+                                if isSelecting {
+                                    toggleSelection(item.id)
+                                } else {
+                                    previewItem = item
+                                }
+                            }
+                        }
+                    }
+                }
+                .coordinateSpace(name: "galleryScrollView")
+                .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
+                    self.itemFrames = frames
+                }
+                .simultaneousGesture(
+                    isSelecting ? DragGesture(minimumDistance: 10, coordinateSpace: .named("galleryScrollView"))
+                        .onChanged { gesture in
+                            let loc = gesture.location
+
+                            if let matchedIndex = galleryStore.items.firstIndex(where: { itemFrames[$0.id]?.contains(loc) == true }) {
+                                let matchedItem = galleryStore.items[matchedIndex]
+                                let currentRow = matchedIndex / 3
+
+                                if startRow == nil {
+                                    startRow = currentRow
+                                    selectedIds.insert(matchedItem.id)
+                                } else if currentRow != startRow {
+                                    let initialRow = startRow!
+                                    let fromRow = min(initialRow, currentRow)
+                                    let toRow = max(initialRow, currentRow)
+
+                                    for r in fromRow...toRow {
+                                        let firstInRow = r * 3
+                                        let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
+                                        if firstInRow <= lastInRow {
+                                            for i in firstInRow...lastInRow {
+                                                selectedIds.insert(galleryStore.items[i].id)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    selectedIds.insert(matchedItem.id)
+                                }
+                            }
+                        }
+                        .onEnded { _ in
+                            startRow = nil
+                        } : nil
+                )
+
+                // Selection toolbar
+                if isSelecting {
+                    selectionToolbar
+                }
+            }
+        }
     }
 
     // MARK: - Header
