@@ -37,8 +37,15 @@ class GalleryStore: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let loaded = try decoder.decode([MediaItem].self, from: data)
+
+            // Filter out items whose physical file no longer exists
+            let validItems = loaded.filter { item in
+                let path = galleryURL.appendingPathComponent(item.filename).path
+                return fileManager.fileExists(atPath: path)
+            }
+
             DispatchQueue.main.async {
-                self.items = loaded.sorted { $0.createdAt > $1.createdAt }
+                self.items = validItems.sorted { $0.createdAt > $1.createdAt }
             }
         } catch {
             print("GalleryStore: Failed to load index: \(error)")
@@ -112,8 +119,10 @@ class GalleryStore: ObservableObject {
                 }
                 try self.fileManager.copyItem(at: url, to: destURL)
 
-                // Generate video thumbnail
-                self.generateVideoThumbnail(url: destURL, for: id)
+                // Generate video thumbnail asynchronously after brief delay for file flush
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.3) {
+                    self.generateVideoThumbnail(url: destURL, for: id)
+                }
 
                 let attributes = try self.fileManager.attributesOfItem(atPath: destURL.path)
                 let fileSize = attributes[.size] as? Int64 ?? 0

@@ -362,6 +362,8 @@ struct MediaPreviewView: View {
     let galleryStore: GalleryStore
     @Environment(\.dismiss) private var dismiss
 
+    @State private var player: AVPlayer? = nil
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -369,13 +371,20 @@ struct MediaPreviewView: View {
             if item.type == .photo {
                 photoPreview
             } else {
-                videoPreview
+                if let player = player {
+                    VideoPlayer(player: player)
+                        .ignoresSafeArea()
+                }
             }
 
             // Top bar
             VStack {
                 HStack {
-                    Button(action: { dismiss() }) {
+                    Button(action: {
+                        player?.pause()
+                        player = nil
+                        dismiss()
+                    }) {
                         Image(systemName: "xmark")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white)
@@ -405,6 +414,18 @@ struct MediaPreviewView: View {
                 Spacer()
             }
         }
+        .onAppear {
+            if item.type == .video {
+                let url = galleryStore.getFullPath(for: item)
+                let avPlayer = AVPlayer(url: url)
+                self.player = avPlayer
+                avPlayer.play()
+            }
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
         .statusBarHidden(true)
     }
 
@@ -414,13 +435,6 @@ struct MediaPreviewView: View {
         if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
             ZoomableImageView(image: image)
         }
-    }
-
-    @ViewBuilder
-    private var videoPreview: some View {
-        let url = galleryStore.getFullPath(for: item)
-        VideoPlayer(player: AVPlayer(url: url))
-            .ignoresSafeArea()
     }
 
     private func shareItem() {

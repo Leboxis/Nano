@@ -8,6 +8,9 @@ struct NanoApp: App {
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var settings = AppSettings()
 
+    // Store original system brightness before opening app
+    @State private var originalSystemBrightness: CGFloat = UIScreen.main.brightness
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -16,6 +19,9 @@ struct NanoApp: App {
                 .environmentObject(settings)
                 .preferredColorScheme(.dark)
                 .onAppear {
+                    // Save initial brightness
+                    originalSystemBrightness = UIScreen.main.brightness
+
                     // Configure AVAudioSession to ALLOW haptics and system sounds during recording (iOS 13+)
                     do {
                         let audioSession = AVAudioSession.sharedInstance()
@@ -45,6 +51,13 @@ struct NanoApp: App {
                     case .active:
                         cameraManager.startSession()
                     case .inactive, .background:
+                        // Restore user's original phone brightness when app is minimized/closed!
+                        UIScreen.main.brightness = originalSystemBrightness
+
+                        // Stop active recording safely if app goes to background
+                        if cameraManager.isRecording {
+                            cameraManager.stopRecording()
+                        }
                         cameraManager.stopSession()
                     @unknown default:
                         break
