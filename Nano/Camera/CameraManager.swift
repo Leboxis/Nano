@@ -243,19 +243,7 @@ class CameraManager: NSObject, ObservableObject {
             var maxFoundWidth: Int32 = 0
 
             for format in camera.formats {
-                if #available(iOS 16.0, *) {
-                    for dims in format.supportedPhotoMaxDimensions {
-                        if dims.width > maxFoundWidth {
-                            maxFoundWidth = dims.width
-                            bestFormat = format
-                        }
-                        if dims.width >= targetWidth {
-                            bestFormat = format
-                            break
-                        }
-                    }
-                } else {
-                    let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                for dims in format.highResolutionStillImageDimensions {
                     if dims.width > maxFoundWidth {
                         maxFoundWidth = dims.width
                         bestFormat = format
