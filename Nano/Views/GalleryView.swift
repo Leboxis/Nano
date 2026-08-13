@@ -45,9 +45,7 @@ struct GalleryView: View {
             MediaPreviewView(item: item, galleryStore: galleryStore)
         }
         .onAppear {
-            if selectedTab == 0 {
-                triggerFaceIDAutoPrompt()
-            }
+            triggerFaceIDAutoPrompt()
         }
         .onDisappear {
             // ALWAYS re-lock Face ID when leaving the Gallery tab
@@ -112,9 +110,8 @@ struct GalleryView: View {
     }
 
     private func triggerFaceIDAutoPrompt() {
-        guard selectedTab == 0 else { return }
         guard !isUnlocked && !isAuthenticating else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if self.selectedTab == 0 && !self.isUnlocked && !self.isAuthenticating {
                 self.authenticateWithFaceID()
             }
@@ -122,8 +119,6 @@ struct GalleryView: View {
     }
 
     private func authenticateWithFaceID() {
-        // STRICT GUARD: Face ID must NEVER run unless user is actively on Gallery tab (selectedTab == 0)
-        guard selectedTab == 0 else { return }
         guard !isUnlocked && !isAuthenticating else { return }
         isAuthenticating = true
 
@@ -139,11 +134,7 @@ struct GalleryView: View {
         context.evaluatePolicy(policy, localizedReason: reason) { success, error in
             DispatchQueue.main.async {
                 self.isAuthenticating = false
-                if self.selectedTab == 0 {
-                    self.isUnlocked = success
-                } else {
-                    self.isUnlocked = false
-                }
+                self.isUnlocked = success
                 if let err = error {
                     print("GalleryView: Face ID error: \(err.localizedDescription)")
                 }
