@@ -157,7 +157,7 @@ class CameraManager: NSObject, ObservableObject {
 
                 // Unlock maximum supported photo dimensions on photoOutput (iOS 16+)
                 if #available(iOS 16.0, *) {
-                    if let maxSupported = camera.activeFormat.supportedMaxPhotoDimensions.last {
+                    if let maxSupported = camera.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
                         photoOut.maxPhotoDimensions = maxSupported
                         print("CameraManager: Configured photoOutput maxPhotoDimensions: \(maxSupported.width)x\(maxSupported.height)")
                     }
@@ -414,7 +414,7 @@ class CameraManager: NSObject, ObservableObject {
 
             // Update photoOutput maxPhotoDimensions for new camera on iOS 16+
             if #available(iOS 16.0, *), let photoOut = self.photoOutput {
-                if let maxSupported = newCamera.activeFormat.supportedMaxPhotoDimensions.last {
+                if let maxSupported = newCamera.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
                     photoOut.maxPhotoDimensions = maxSupported
                 }
             }
@@ -464,7 +464,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Native High-Resolution Photo Capture (24 MP & 48 MP Support)
+    // MARK: - Native High-Resolution Photo Capture (24 MP & 48 MP Safe Bounds)
 
     func capturePhoto() {
         guard let photoOutput = photoOutput else {
@@ -484,8 +484,16 @@ class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings()
             }
 
-            // Request selected Megapixel resolution from activeFormat.supportedMaxPhotoDimensions (iOS 16+)
-            if #available(iOS 16.0, *), let camera = self.currentCamera {
+            // Safe bound checking on iOS 16+ to guarantee settings.maxPhotoDimensions <= photoOutput.maxPhotoDimensions
+            if #available(iOS 16.0, *), let camera = self.currentCamera, let photoOutput = self.photoOutput {
+                // Ensure output ceiling is initialized to active format's max
+                if let maxDim = camera.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
+                    if photoOutput.maxPhotoDimensions.width < maxDim.width {
+                        photoOutput.maxPhotoDimensions = maxDim
+                    }
+                }
+
+                let outputMaxDims = photoOutput.maxPhotoDimensions
                 let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
                 let targetMP = self.photoMegapixels
 
@@ -498,19 +506,28 @@ class CameraManager: NSObject, ObservableObject {
                 default: desiredWidth = 5712
                 }
 
-                var chosenDims = supportedDims.last ?? CMVideoDimensions(width: 4032, height: 3024)
-                for dims in supportedDims {
-                    if dims.width <= desiredWidth {
-                        chosenDims = dims
+                // Filter candidates that do NOT exceed photoOutput's ceiling
+                let validCandidates = supportedDims.filter {
+                    $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
+                }
+
+                var chosenDims = outputMaxDims
+                if !validCandidates.isEmpty {
+                    var match = validCandidates.last!
+                    for dims in validCandidates {
+                        if dims.width <= desiredWidth {
+                            match = dims
+                        }
+                        if dims.width == desiredWidth {
+                            match = dims
+                            break
+                        }
                     }
-                    if dims.width == desiredWidth {
-                        chosenDims = dims
-                        break
-                    }
+                    chosenDims = match
                 }
 
                 settings.maxPhotoDimensions = chosenDims
-                print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting")
+                print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting (ceiling: \(outputMaxDims.width)x\(outputMaxDims.height))")
             }
 
             // Configure native AVFoundation photo mirroring for front camera
