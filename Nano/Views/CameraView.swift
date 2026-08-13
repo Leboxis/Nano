@@ -4,25 +4,25 @@ struct CameraView: View {
     @EnvironmentObject var cameraManager: CameraManager
     @EnvironmentObject var settings: AppSettings
 
-    @State private var isBursting = false
-
     var body: some View {
         ZStack {
-            // Completely black background
             Color.black
         }
         .ignoresSafeArea()
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onEnded { value in
-                    let distance = hypot(value.translation.width, value.translation.height)
-                    // Only stationary tap (distance < 15px) triggers capture.
-                    // Horizontal swipes to change tabs (distance >= 15px) are ignored!
-                    if distance < 15 {
-                        handleTap()
-                    }
+        .onTapGesture {
+            handleTap()
+        }
+        .onLongPressGesture(minimumDuration: 0.3, pressing: { isPressing in
+            if isPressing {
+                if settings.captureMode == .photo {
+                    cameraManager.startBurst()
                 }
-        )
+            } else {
+                if settings.captureMode == .photo {
+                    cameraManager.stopBurst()
+                }
+            }
+        }, perform: {})
         .statusBarHidden(true)
     }
 
