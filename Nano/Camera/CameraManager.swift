@@ -2,6 +2,7 @@ import AVFoundation
 import UIKit
 import SwiftUI
 import AudioToolbox
+import UniformTypeIdentifiers
 
 class CameraManager: NSObject, ObservableObject {
     @Published var isRecording = false
@@ -442,7 +443,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Photo Capture (Native HEIC, 16:9, No Apple Image Enhancement)
+    // MARK: - Photo Capture (Native HEIC, 16:9, High-Res Sensor)
 
     func capturePhoto() {
         guard let photoOutput = photoOutput else {
@@ -455,7 +456,7 @@ class CameraManager: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
 
-            // Configure Native HEIC format if available
+            // HEIC format settings
             let settings: AVCapturePhotoSettings
             if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
                 settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
@@ -463,8 +464,8 @@ class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings()
             }
 
-            // Disable Apple's Deep Fusion & Smart HDR computational post-processing by choosing .speed
-            settings.photoQualityPrioritization = .speed
+            // Balanced prioritization preserves full sensor megapixel resolution
+            settings.photoQualityPrioritization = .balanced
 
             let dims = self.photoDimensionsForMP(self.photoMegapixels)
             if #available(iOS 16.0, *) {
@@ -593,11 +594,11 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         if let error = error {
             print("CameraManager: Photo capture error: \(error)")
         } else if let rawData = photo.fileDataRepresentation(), let image = UIImage(data: rawData) {
-            // Crop image to 16:9 ratio in raw unenhanced state
+            // Crop image to 16:9 ratio while preserving sensor orientation
             let croppedImage = cropTo16By9(image) ?? image
-            let finalData = croppedImage.jpegData(compressionQuality: 0.95) ?? rawData
+            let heicData = exportToHEIC(image: croppedImage, compressionQuality: 0.95) ?? rawData
 
-            galleryStore?.savePhoto(data: finalData)
+            galleryStore?.savePhoto(data: heicData)
         }
 
         // If native burst is active, trigger next frame immediately
@@ -613,7 +614,7 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         let width = CGFloat(cgImage.width)
         let height = CGFloat(cgImage.height)
 
-        // In portrait orientation: 9:16 aspect ratio (width: height = 9:16 -> targetHeight = width * 16 / 9)
+        // Portrait orientation: 9:16 aspect ratio (targetHeight = width * 16 / 9)
         let targetHeight = width * (16.0 / 9.0)
 
         let cropRect: CGRect
@@ -628,6 +629,22 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
 
         guard let croppedCG = cgImage.cropping(to: cropRect) else { return nil }
         return UIImage(cgImage: croppedCG, scale: image.scale, orientation: image.imageOrientation)
+    }
+
+    private func exportToHEIC(image: UIImage, compressionQuality: CGFloat = 0.95) -> Data? {
+        guard let cgImage = image.cgImage else { return nil }
+        let mutableData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(mutableData, UTType.heic.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: compressionQuality
+        ]
+        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+        if CGImageDestinationFinalize(destination) {
+            return mutableData as Data
+        }
+        return nil
     }
 }
 

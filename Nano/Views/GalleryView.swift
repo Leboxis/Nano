@@ -44,9 +44,7 @@ struct GalleryView: View {
             MediaPreviewView(item: item, galleryStore: galleryStore)
         }
         .onAppear {
-            if !isUnlocked {
-                authenticateWithFaceID()
-            }
+            triggerFaceIDAutoPrompt()
         }
         .onDisappear {
             // ALWAYS re-lock Face ID when leaving the Gallery tab!
@@ -59,9 +57,7 @@ struct GalleryView: View {
                 isSelecting = false
                 selectedIds.removeAll()
             } else {
-                if !isUnlocked {
-                    authenticateWithFaceID()
-                }
+                triggerFaceIDAutoPrompt()
             }
         }
         .statusBarHidden(true)
@@ -105,6 +101,15 @@ struct GalleryView: View {
             .padding(.top, 12)
 
             Spacer()
+        }
+    }
+
+    private func triggerFaceIDAutoPrompt() {
+        guard !isUnlocked else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            if self.selectedTab == 0 && !self.isUnlocked {
+                self.authenticateWithFaceID()
+            }
         }
     }
 

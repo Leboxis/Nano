@@ -71,7 +71,7 @@ class GalleryStore: ObservableObject {
             guard let self = self else { return }
 
             let id = UUID()
-            let filename = "\(id.uuidString).jpg"
+            let filename = "\(id.uuidString).heic"
             let fileURL = self.galleryURL.appendingPathComponent(filename)
 
             do {
