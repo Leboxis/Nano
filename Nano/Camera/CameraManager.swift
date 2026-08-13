@@ -3,7 +3,6 @@ import UIKit
 import SwiftUI
 import AudioToolbox
 import UniformTypeIdentifiers
-import CoreImage
 
 class CameraManager: NSObject, ObservableObject {
     @Published var isRecording = false
@@ -150,7 +149,7 @@ class CameraManager: NSObject, ObservableObject {
                 }
             }
 
-            // Photo output with maximum 48 MP high-resolution capture support
+            // Photo output
             let photoOut = AVCapturePhotoOutput()
             photoOut.isHighResolutionCaptureEnabled = true
             if session.canAddOutput(photoOut) {
@@ -445,7 +444,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Photo Capture (Native HEIC, Full Sensor Megapixel 9:16)
+    // MARK: - Simple Native Apple Photo Capture
 
     func capturePhoto() {
         guard let photoOutput = photoOutput else {
@@ -466,13 +465,17 @@ class CameraManager: NSObject, ObservableObject {
             }
 
             settings.isHighResolutionPhotoEnabled = true
-            settings.photoQualityPrioritization = .balanced
 
+            // Set photo dimensions according to Megapixels setting (8, 12, 24, 48 MP)
+            let dims = self.photoDimensionsForMP(self.photoMegapixels)
             if #available(iOS 16.0, *) {
-                let supportedDims = photoOutput.maxPhotoDimensions
-                settings.maxPhotoDimensions = supportedDims
+                let maxDims = photoOutput.maxPhotoDimensions
+                let w = min(dims.width, maxDims.width)
+                let h = min(dims.height, maxDims.height)
+                settings.maxPhotoDimensions = CMVideoDimensions(width: w, height: h)
             }
 
+            // Configure native AVFoundation photo mirroring for front camera
             if let connection = photoOutput.connection(with: .video) {
                 if connection.isVideoOrientationSupported {
                     connection.videoOrientation = .portrait
@@ -484,6 +487,16 @@ class CameraManager: NSObject, ObservableObject {
             }
 
             photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+    }
+
+    private func photoDimensionsForMP(_ mp: Int) -> CMVideoDimensions {
+        switch mp {
+        case 8: return CMVideoDimensions(width: 3264, height: 2448)
+        case 12: return CMVideoDimensions(width: 4032, height: 3024)
+        case 24: return CMVideoDimensions(width: 5712, height: 4284)
+        case 48: return CMVideoDimensions(width: 8064, height: 6048)
+        default: return CMVideoDimensions(width: 5712, height: 4284)
         }
     }
 
@@ -529,7 +542,7 @@ class CameraManager: NSObject, ObservableObject {
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
-    // MARK: - Video Recording
+    // MARK: - Video Recording (Untouched)
 
     func startRecording() {
         guard let movieOutput = movieOutput, !isRecording else { return }
@@ -573,7 +586,7 @@ class CameraManager: NSObject, ObservableObject {
     }
 }
 
-// MARK: - AVCapturePhotoCaptureDelegate
+// MARK: - AVCapturePhotoCaptureDelegate (Simple Native Apple Photo Capture)
 
 extension CameraManager: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput,
@@ -584,13 +597,9 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // Process photo asynchronously on background queue so UI swipe is never blocked
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-
-            if let heicData = self.processPhotoTo16By9HEIC(photo) {
-                self.galleryStore?.savePhoto(data: heicData)
-            }
+        // Save native Apple photo representation directly
+        if let data = photo.fileDataRepresentation() {
+            galleryStore?.savePhoto(data: data)
         }
 
         // If native burst is active, trigger next frame immediately
@@ -600,57 +609,9 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             }
         }
     }
-
-    private func processPhotoTo16By9HEIC(_ photo: AVCapturePhoto) -> Data? {
-        guard let rawData = photo.fileDataRepresentation(),
-              let ciImage = CIImage(data: rawData) else { return nil }
-
-        // Orient CIImage cleanly using hardware EXIF orientation (handles front/back camera EXIF rotation)
-        let orientationVal = photo.metadata[String(kCGImagePropertyOrientation)] as? Int32 ?? 6
-        let orientedCI = ciImage.oriented(forExifOrientation: orientationVal)
-
-        let extent = orientedCI.extent
-        let w = extent.width
-        let h = extent.height
-
-        // Calculate 9:16 portrait crop rect at full pixel resolution
-        let targetH = w * (16.0 / 9.0)
-        let cropRect: CGRect
-        if targetH <= h {
-            let offsetY = (h - targetH) / 2.0
-            cropRect = CGRect(x: extent.origin.x, y: extent.origin.y + offsetY, width: w, height: targetH)
-        } else {
-            let targetW = h * (9.0 / 16.0)
-            let offsetX = (w - targetW) / 2.0
-            cropRect = CGRect(x: extent.origin.x + offsetX, y: extent.origin.y, width: targetW, height: h)
-        }
-
-        let croppedCI = orientedCI.cropped(to: cropRect)
-
-        // 3. Render cropped CIImage to CGImage using CIContext at maximum resolution
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(croppedCI, from: croppedCI.extent) else {
-            return rawData
-        }
-
-        // 4. Encode CGImage to HEIC Data using CGImageDestination
-        let mutableData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(mutableData, UTType.heic.identifier as CFString, 1, nil) else {
-            return rawData
-        }
-        let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: 0.95
-        ]
-        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
-        if CGImageDestinationFinalize(destination) {
-            return mutableData as Data
-        }
-
-        return rawData
-    }
 }
 
-// MARK: - AVCaptureFileOutputRecordingDelegate
+// MARK: - AVCaptureFileOutputRecordingDelegate (Untouched Video)
 
 extension CameraManager: AVCaptureFileOutputRecordingDelegate {
     func fileOutput(_ output: AVCaptureFileOutput,
