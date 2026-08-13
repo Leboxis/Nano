@@ -154,6 +154,14 @@ class CameraManager: NSObject, ObservableObject {
             if session.canAddOutput(photoOut) {
                 session.addOutput(photoOut)
                 self.photoOutput = photoOut
+
+                // Unlock maximum supported photo dimensions on photoOutput (iOS 16+)
+                if #available(iOS 16.0, *) {
+                    if let maxSupported = camera.activeFormat.supportedMaxPhotoDimensions.last {
+                        photoOut.maxPhotoDimensions = maxSupported
+                        print("CameraManager: Configured photoOutput maxPhotoDimensions: \(maxSupported.width)x\(maxSupported.height)")
+                    }
+                }
             }
 
             // Movie output
@@ -404,6 +412,13 @@ class CameraManager: NSObject, ObservableObject {
                 print("CameraManager: Failed to switch camera: \(error)")
             }
 
+            // Update photoOutput maxPhotoDimensions for new camera on iOS 16+
+            if #available(iOS 16.0, *), let photoOut = self.photoOutput {
+                if let maxSupported = newCamera.activeFormat.supportedMaxPhotoDimensions.last {
+                    photoOut.maxPhotoDimensions = maxSupported
+                }
+            }
+
             session.commitConfiguration()
 
             self.applyZoomNow()
@@ -449,7 +464,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Simple Native Apple Photo Capture
+    // MARK: - Native High-Resolution Photo Capture (24 MP & 48 MP Support)
 
     func capturePhoto() {
         guard let photoOutput = photoOutput else {
@@ -467,6 +482,35 @@ class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
             } else {
                 settings = AVCapturePhotoSettings()
+            }
+
+            // Request selected Megapixel resolution from activeFormat.supportedMaxPhotoDimensions (iOS 16+)
+            if #available(iOS 16.0, *), let camera = self.currentCamera {
+                let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
+                let targetMP = self.photoMegapixels
+
+                let desiredWidth: Int32
+                switch targetMP {
+                case 8: desiredWidth = 3264
+                case 12: desiredWidth = 4032
+                case 24: desiredWidth = 5712
+                case 48: desiredWidth = 8064
+                default: desiredWidth = 5712
+                }
+
+                var chosenDims = supportedDims.last ?? CMVideoDimensions(width: 4032, height: 3024)
+                for dims in supportedDims {
+                    if dims.width <= desiredWidth {
+                        chosenDims = dims
+                    }
+                    if dims.width == desiredWidth {
+                        chosenDims = dims
+                        break
+                    }
+                }
+
+                settings.maxPhotoDimensions = chosenDims
+                print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting")
             }
 
             // Configure native AVFoundation photo mirroring for front camera
