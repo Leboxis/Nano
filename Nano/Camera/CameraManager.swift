@@ -26,6 +26,15 @@ class CameraManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        defaults.register(defaults: [
+            "vibrationsEnabled": true,
+            "photoMegapixels": 24,
+            "videoQuality": "4K",
+            "videoFPS": 60,
+            "zoomLevel": 1,
+            "useFrontCamera": false,
+            "lastMode": "photo"
+        ])
         let lastMode = defaults.string(forKey: "lastMode") ?? "photo"
         captureMode = CaptureMode(rawValue: lastMode) ?? .photo
     }
@@ -52,10 +61,7 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     private var vibrationsEnabled: Bool {
-        if defaults.object(forKey: "vibrationsEnabled") == nil {
-            return true // default on
-        }
-        return defaults.bool(forKey: "vibrationsEnabled")
+        defaults.object(forKey: "vibrationsEnabled") as? Bool ?? true
     }
 
     private var useFrontCamera: Bool {
@@ -95,6 +101,7 @@ class CameraManager: NSObject, ObservableObject {
 
             let session = AVCaptureSession()
             session.beginConfiguration()
+            session.automaticallyConfiguresApplicationAudioSession = false
 
             // Camera input
             let position: AVCaptureDevice.Position = self.useFrontCamera ? .front : .back
@@ -397,8 +404,9 @@ class CameraManager: NSObject, ObservableObject {
             generator.prepare()
             generator.impactOccurred()
 
-            // Direct hardware vibration motor trigger (kSystemSoundID_Vibrate = 4095/1352)
+            // Trigger physical hardware vibration motor
             AudioServicesPlaySystemSound(SystemSoundID(kSystemSoundID_Vibrate))
+            AudioServicesPlaySystemSound(1520)
         }
     }
 
@@ -436,7 +444,6 @@ class CameraManager: NSObject, ObservableObject {
                 settings.maxPhotoDimensions = CMVideoDimensions(width: targetWidth, height: targetHeight)
             }
 
-            // Explicitly disable automatic mirroring and mirror if front camera
             if let connection = photoOutput.connection(with: .video), connection.isVideoMirroringSupported {
                 connection.automaticallyAdjustsVideoMirroring = false
                 connection.isVideoMirrored = self.useFrontCamera
@@ -494,7 +501,6 @@ class CameraManager: NSObject, ObservableObject {
                 try? FileManager.default.removeItem(at: outputURL)
             }
 
-            // Explicitly disable automatic video mirroring and mirror if front camera
             if let connection = movieOutput.connection(with: .video) {
                 if connection.isVideoMirroringSupported {
                     connection.automaticallyAdjustsVideoMirroring = false
@@ -535,7 +541,7 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // If front camera, physically flip JPEG image data horizontally
+        // If front camera, physically flip JPEG image data horizontally (left-right)
         if useFrontCamera, let image = UIImage(data: data) {
             if let mirroredImage = flipImageHorizontally(image), let jpegData = mirroredImage.jpegData(compressionQuality: 0.95) {
                 data = jpegData
@@ -546,27 +552,31 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
     }
 
     private func flipImageHorizontally(_ image: UIImage) -> UIImage? {
-        let mirroredOrientation: UIImage.Orientation
-        switch image.imageOrientation {
-        case .up: mirroredOrientation = .upMirrored
-        case .down: mirroredOrientation = .downMirrored
-        case .left: mirroredOrientation = .leftMirrored
-        case .right: mirroredOrientation = .rightMirrored
-        case .upMirrored: mirroredOrientation = .up
-        case .downMirrored: mirroredOrientation = .down
-        case .leftMirrored: mirroredOrientation = .left
-        case .rightMirrored: mirroredOrientation = .right
-        @unknown default: mirroredOrientation = .upMirrored
-        }
-
-        guard let cgImage = image.cgImage else { return nil }
-        let mirroredImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: mirroredOrientation)
+        guard let normalized = image.fixOrientation() else { return nil }
+        let size = normalized.size
         let format = UIGraphicsImageRendererFormat()
-        format.scale = mirroredImage.scale
-        let size = mirroredImage.size
+        format.scale = normalized.scale
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { context in
+            context.cgContext.translateBy(x: size.width, y: 0)
+            context.cgContext.scaleBy(x: -1.0, y: 1.0)
+            normalized.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}
+
+// MARK: - UIImage Extension
+
+extension UIImage {
+    func fixOrientation() -> UIImage? {
+        if self.imageOrientation == .up {
+            return self
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = self.scale
+        let renderer = UIGraphicsImageRenderer(size: self.size, format: format)
         return renderer.image { _ in
-            mirroredImage.draw(in: CGRect(origin: .zero, size: size))
+            self.draw(in: CGRect(origin: .zero, size: self.size))
         }
     }
 }

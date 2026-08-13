@@ -15,6 +15,7 @@ struct GalleryView: View {
     @State private var selectedIds: Set<UUID> = []
     @State private var previewItem: MediaItem? = nil
     @State private var itemFrames: [UUID: CGRect] = [:]
+    @State private var startRow: Int? = nil
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -36,50 +37,92 @@ struct GalleryView: View {
                 if galleryStore.items.isEmpty {
                     emptyState
                 } else {
-                    // Grid
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 2) {
-                            ForEach(galleryStore.items) { item in
-                                ThumbnailCell(
-                                    item: item,
-                                    isSelecting: isSelecting,
-                                    isSelected: selectedIds.contains(item.id),
-                                    galleryStore: galleryStore
-                                )
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: ItemFramePreferenceKey.self,
-                                            value: [item.id: geo.frame(in: .named("galleryScrollView"))]
+                    GeometryReader { outerGeo in
+                        ScrollViewReader { scrollProxy in
+                            ScrollView {
+                                LazyVGrid(columns: columns, spacing: 2) {
+                                    ForEach(Array(galleryStore.items.enumerated()), id: \.element.id) { index, item in
+                                        ThumbnailCell(
+                                            item: item,
+                                            isSelecting: isSelecting,
+                                            isSelected: selectedIds.contains(item.id),
+                                            galleryStore: galleryStore
                                         )
-                                    }
-                                )
-                                .onTapGesture {
-                                    if isSelecting {
-                                        toggleSelection(item.id)
-                                    } else {
-                                        previewItem = item
+                                        .id(item.id)
+                                        .background(
+                                            GeometryReader { geo in
+                                                Color.clear.preference(
+                                                    key: ItemFramePreferenceKey.self,
+                                                    value: [item.id: geo.frame(in: .named("galleryScrollView"))]
+                                                )
+                                            }
+                                        )
+                                        .onTapGesture {
+                                            if isSelecting {
+                                                toggleSelection(item.id)
+                                            } else {
+                                                previewItem = item
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            .coordinateSpace(name: "galleryScrollView")
+                            .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
+                                self.itemFrames = frames
+                            }
+                            .simultaneousGesture(
+                                isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
+                                    .onChanged { gesture in
+                                        let loc = gesture.location
+
+                                        // Find index of item under finger
+                                        if let matchedIndex = galleryStore.items.firstIndex(where: { itemFrames[$0.id]?.contains(loc) == true }) {
+                                            let currentRow = matchedIndex / 3
+
+                                            if startRow == nil {
+                                                startRow = currentRow
+                                            }
+
+                                            let fromRow = min(startRow ?? currentRow, currentRow)
+                                            let toRow = max(startRow ?? currentRow, currentRow)
+
+                                            // Select all items in all rows from fromRow to toRow
+                                            for r in fromRow...toRow {
+                                                let firstInRow = r * 3
+                                                let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
+                                                if firstInRow <= lastInRow {
+                                                    for i in firstInRow...lastInRow {
+                                                        selectedIds.insert(galleryStore.items[i].id)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Auto-scroll when near top or bottom edges
+                                        let containerH = outerGeo.size.height
+                                        if loc.y < 80 {
+                                            // Near top edge -> scroll toward top
+                                            if let firstId = galleryStore.items.first?.id {
+                                                withAnimation(.linear(duration: 0.15)) {
+                                                    scrollProxy.scrollTo(firstId, anchor: .top)
+                                                }
+                                            }
+                                        } else if loc.y > containerH - 80 {
+                                            // Near bottom edge -> scroll toward bottom
+                                            if let lastId = galleryStore.items.last?.id {
+                                                withAnimation(.linear(duration: 0.15)) {
+                                                    scrollProxy.scrollTo(lastId, anchor: .bottom)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        startRow = nil
+                                    } : nil
+                            )
                         }
                     }
-                    .scrollDisabled(isSelecting)
-                    .coordinateSpace(name: "galleryScrollView")
-                    .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
-                        self.itemFrames = frames
-                    }
-                    .highPriorityGesture(
-                        isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
-                            .onChanged { gesture in
-                                let loc = gesture.location
-                                for (id, frame) in itemFrames {
-                                    if frame.contains(loc) {
-                                        selectedIds.insert(id)
-                                    }
-                                }
-                            } : nil
-                    )
 
                     // Selection toolbar
                     if isSelecting {
@@ -110,6 +153,7 @@ struct GalleryView: View {
                         isSelecting.toggle()
                         if !isSelecting {
                             selectedIds.removeAll()
+                            startRow = nil
                         }
                     }
                 }) {
