@@ -1,12 +1,20 @@
 import SwiftUI
 import AVKit
 
+struct ItemFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
 
     @State private var isSelecting = false
     @State private var selectedIds: Set<UUID> = []
     @State private var previewItem: MediaItem? = nil
+    @State private var itemFrames: [UUID: CGRect] = [:]
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -38,6 +46,14 @@ struct GalleryView: View {
                                     isSelected: selectedIds.contains(item.id),
                                     galleryStore: galleryStore
                                 )
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: ItemFramePreferenceKey.self,
+                                            value: [item.id: geo.frame(in: .named("galleryScrollView"))]
+                                        )
+                                    }
+                                )
                                 .onTapGesture {
                                     if isSelecting {
                                         toggleSelection(item.id)
@@ -48,6 +64,21 @@ struct GalleryView: View {
                             }
                         }
                     }
+                    .coordinateSpace(name: "galleryScrollView")
+                    .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
+                        self.itemFrames = frames
+                    }
+                    .gesture(
+                        isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
+                            .onChanged { gesture in
+                                let loc = gesture.location
+                                for (id, frame) in itemFrames {
+                                    if frame.contains(loc) {
+                                        selectedIds.insert(id)
+                                    }
+                                }
+                            } : nil
+                    )
 
                     // Selection toolbar
                     if isSelecting {

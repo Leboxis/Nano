@@ -34,16 +34,16 @@ class CameraManager: NSObject, ObservableObject {
 
     private var photoMegapixels: Int {
         let val = defaults.integer(forKey: "photoMegapixels")
-        return val > 0 ? val : 12
+        return val > 0 ? val : 24
     }
 
     private var videoQuality: String {
-        defaults.string(forKey: "videoQuality") ?? "1080p"
+        defaults.string(forKey: "videoQuality") ?? "4K"
     }
 
     private var videoFPS: Int {
         let val = defaults.integer(forKey: "videoFPS")
-        return val > 0 ? val : 30
+        return val > 0 ? val : 60
     }
 
     private var zoomLevel: Int {
@@ -148,9 +148,9 @@ class CameraManager: NSObject, ObservableObject {
             session.commitConfiguration()
             self.captureSession = session
 
-            // Apply zoom and frame rate after session is configured
+            // Apply zoom & format/FPS after session configuration
             self.applyZoomNow()
-            self.applyFrameRateNow()
+            self.applyVideoFormatAndFPS()
         }
     }
 
@@ -178,21 +178,21 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Session Preset
+    // MARK: - Session Preset & FPS
 
     private func applySessionPreset(session: AVCaptureSession) {
-        let preset: AVCaptureSession.Preset
         switch captureMode {
         case .photo:
-            preset = .photo
+            if session.canSetSessionPreset(.photo) {
+                session.sessionPreset = .photo
+            }
         case .video:
-            preset = videoPresetForQuality(videoQuality)
-        }
-
-        if session.canSetSessionPreset(preset) {
-            session.sessionPreset = preset
-        } else if session.canSetSessionPreset(.high) {
-            session.sessionPreset = .high
+            let preset = videoPresetForQuality(videoQuality)
+            if session.canSetSessionPreset(preset) {
+                session.sessionPreset = preset
+            } else if session.canSetSessionPreset(.high) {
+                session.sessionPreset = .high
+            }
         }
     }
 
@@ -202,7 +202,70 @@ class CameraManager: NSObject, ObservableObject {
         case "720p": return .hd1280x720
         case "1080p": return .hd1920x1080
         case "4K": return .hd4K3840x2160
-        default: return .hd1920x1080
+        default: return .hd4K3840x2160
+        }
+    }
+
+    private func applyVideoFormatAndFPS() {
+        guard let camera = currentCamera, let session = captureSession else { return }
+        guard captureMode == .video else { return }
+
+        let targetFPS = Double(self.videoFPS)
+        let quality = self.videoQuality
+
+        let targetWidth: Int32
+        switch quality {
+        case "4K": targetWidth = 3840
+        case "1080p": targetWidth = 1920
+        case "720p": targetWidth = 1280
+        case "480p": targetWidth = 640
+        default: targetWidth = 3840
+        }
+
+        do {
+            try camera.lockForConfiguration()
+
+            var bestFormat: AVCaptureDevice.Format?
+            var highestFPSFormat: AVCaptureDevice.Format?
+            var maxFPSFound: Double = 30.0
+
+            for format in camera.formats {
+                let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                let isMatchingResolution = (quality == "4K" ? dims.width >= 3840 : dims.width == targetWidth)
+
+                if isMatchingResolution {
+                    for range in format.videoSupportedFrameRateRanges {
+                        if range.maxFrameRate > maxFPSFound {
+                            maxFPSFound = range.maxFrameRate
+                            highestFPSFormat = format
+                        }
+                        if targetFPS >= range.minFrameRate && targetFPS <= range.maxFrameRate {
+                            bestFormat = format
+                            break
+                        }
+                    }
+                }
+                if bestFormat != nil { break }
+            }
+
+            let formatToUse = bestFormat ?? highestFPSFormat
+
+            if let format = formatToUse {
+                if session.canSetSessionPreset(.inputPriority) {
+                    session.sessionPreset = .inputPriority
+                }
+                camera.activeFormat = format
+
+                let fpsToSet = min(targetFPS, maxFPSFound)
+                let duration = CMTime(value: 1, timescale: Int32(fpsToSet))
+                camera.activeVideoMinFrameDuration = duration
+                camera.activeVideoMaxFrameDuration = duration
+                print("CameraManager: Configured format \(targetWidth)p @ \(fpsToSet) FPS")
+            }
+
+            camera.unlockForConfiguration()
+        } catch {
+            print("CameraManager: Failed to configure video format and FPS: \(error)")
         }
     }
 
@@ -218,7 +281,7 @@ class CameraManager: NSObject, ObservableObject {
             self.applySessionPreset(session: session)
             session.commitConfiguration()
             if mode == .video {
-                self.applyFrameRateNow()
+                self.applyVideoFormatAndFPS()
             }
         }
     }
@@ -234,7 +297,7 @@ class CameraManager: NSObject, ObservableObject {
                 session.sessionPreset = preset
             }
             session.commitConfiguration()
-            self.applyFrameRateNow()
+            self.applyVideoFormatAndFPS()
         }
     }
 
@@ -242,7 +305,7 @@ class CameraManager: NSObject, ObservableObject {
         defaults.set(fps, forKey: "videoFPS")
 
         sessionQueue.async { [weak self] in
-            self?.applyFrameRateNow()
+            self?.applyVideoFormatAndFPS()
         }
     }
 
@@ -256,44 +319,7 @@ class CameraManager: NSObject, ObservableObject {
             session.beginConfiguration()
             self.applySessionPreset(session: session)
             session.commitConfiguration()
-            self.applyFrameRateNow()
-        }
-    }
-
-    // MARK: - Frame Rate (FPS)
-
-    private func applyFrameRateNow() {
-        guard let camera = self.currentCamera else { return }
-
-        let targetFPS = Double(self.videoFPS)
-
-        do {
-            try camera.lockForConfiguration()
-
-            var bestRange: AVFrameRateRange?
-            for range in camera.activeFormat.videoSupportedFrameRateRanges {
-                if targetFPS >= range.minFrameRate && targetFPS <= range.maxFrameRate {
-                    bestRange = range
-                    break
-                }
-            }
-
-            if let range = bestRange {
-                let duration = CMTime(value: 1, timescale: Int32(targetFPS))
-                camera.activeVideoMinFrameDuration = duration
-                camera.activeVideoMaxFrameDuration = duration
-                print("CameraManager: Frame rate set to \(targetFPS) FPS (range \(range.minFrameRate)-\(range.maxFrameRate))")
-            } else if let maxRange = camera.activeFormat.videoSupportedFrameRateRanges.max(by: { $0.maxFrameRate < $1.maxFrameRate }) {
-                let maxFPS = maxRange.maxFrameRate
-                let duration = CMTime(value: 1, timescale: Int32(maxFPS))
-                camera.activeVideoMinFrameDuration = duration
-                camera.activeVideoMaxFrameDuration = duration
-                print("CameraManager: Frame rate clamped to max supported \(maxFPS) FPS")
-            }
-
-            camera.unlockForConfiguration()
-        } catch {
-            print("CameraManager: Failed to set frame rate: \(error)")
+            self.applyVideoFormatAndFPS()
         }
     }
 
@@ -310,7 +336,7 @@ class CameraManager: NSObject, ObservableObject {
             try camera.lockForConfiguration()
             camera.videoZoomFactor = clampedZoom
             camera.unlockForConfiguration()
-            print("CameraManager: Zoom set to \(clampedZoom)x (requested \(desiredZoom)x, max \(maxZoom)x)")
+            print("CameraManager: Zoom set to \(clampedZoom)x")
         } catch {
             print("CameraManager: Failed to set zoom: \(error)")
         }
@@ -333,12 +359,10 @@ class CameraManager: NSObject, ObservableObject {
 
             session.beginConfiguration()
 
-            // Remove current video input
             if let currentInput = self.currentVideoInput {
                 session.removeInput(currentInput)
             }
 
-            // Get new camera
             let position: AVCaptureDevice.Position = toFront ? .front : .back
             guard let newCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
                 print("CameraManager: No camera for position \(position)")
@@ -359,9 +383,8 @@ class CameraManager: NSObject, ObservableObject {
 
             session.commitConfiguration()
 
-            // Re-apply zoom and frame rate on new camera
             self.applyZoomNow()
-            self.applyFrameRateNow()
+            self.applyVideoFormatAndFPS()
         }
     }
 
@@ -374,7 +397,6 @@ class CameraManager: NSObject, ObservableObject {
             generator.prepare()
             generator.impactOccurred()
 
-            // Fallback system vibration sound IDs for guaranteed tactile feedback
             switch style {
             case .light:
                 AudioServicesPlaySystemSound(1519)
@@ -407,7 +429,6 @@ class CameraManager: NSObject, ObservableObject {
             return
         }
 
-        // Haptic feedback
         haptic(.medium)
 
         sessionQueue.async { [weak self] in
@@ -415,7 +436,6 @@ class CameraManager: NSObject, ObservableObject {
 
             let settings = AVCapturePhotoSettings()
 
-            // Configure max photo dimensions based on megapixels
             let dims = self.photoDimensionsForMP(self.photoMegapixels)
             if #available(iOS 16.0, *) {
                 let supportedDims = photoOutput.maxPhotoDimensions
@@ -424,8 +444,9 @@ class CameraManager: NSObject, ObservableObject {
                 settings.maxPhotoDimensions = CMVideoDimensions(width: targetWidth, height: targetHeight)
             }
 
-            // Mirror photo if using front camera
+            // Explicitly disable automatic mirroring and mirror if front camera
             if let connection = photoOutput.connection(with: .video), connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
                 connection.isVideoMirrored = self.useFrontCamera
             }
 
@@ -439,7 +460,7 @@ class CameraManager: NSObject, ObservableObject {
         case 12: return CMVideoDimensions(width: 4032, height: 3024)
         case 24: return CMVideoDimensions(width: 5712, height: 4284)
         case 48: return CMVideoDimensions(width: 8064, height: 6048)
-        default: return CMVideoDimensions(width: 4032, height: 3024)
+        default: return CMVideoDimensions(width: 5712, height: 4284)
         }
     }
 
@@ -469,7 +490,6 @@ class CameraManager: NSObject, ObservableObject {
     func startRecording() {
         guard let movieOutput = movieOutput, !isRecording else { return }
 
-        // Single vibration to signal recording started
         haptic(.heavy)
 
         sessionQueue.async { [weak self] in
@@ -482,9 +502,20 @@ class CameraManager: NSObject, ObservableObject {
                 try? FileManager.default.removeItem(at: outputURL)
             }
 
-            // Mirror video if using front camera
-            if let connection = movieOutput.connection(with: .video), connection.isVideoMirroringSupported {
-                connection.isVideoMirrored = self.useFrontCamera
+            // Explicitly disable automatic video mirroring and mirror if front camera
+            if let connection = movieOutput.connection(with: .video) {
+                if connection.isVideoMirroringSupported {
+                    connection.automaticallyAdjustsVideoMirroring = false
+                    connection.isVideoMirrored = self.useFrontCamera
+                }
+                // Also set connection video frame rate if supported
+                let targetFPS = Double(self.videoFPS)
+                if connection.isVideoMinFrameDurationSupported {
+                    connection.videoMinFrameDuration = CMTime(value: 1, timescale: Int32(targetFPS))
+                }
+                if connection.isVideoMaxFrameDurationSupported {
+                    connection.videoMaxFrameDuration = CMTime(value: 1, timescale: Int32(targetFPS))
+                }
             }
 
             movieOutput.startRecording(to: outputURL, recordingDelegate: self)
@@ -520,7 +551,7 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // If front camera, physically mirror image data if needed
+        // If front camera, physically flip JPEG image data horizontally
         if useFrontCamera, let image = UIImage(data: data) {
             if let mirroredImage = flipImageHorizontally(image), let jpegData = mirroredImage.jpegData(compressionQuality: 0.95) {
                 data = jpegData
@@ -533,11 +564,12 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
     private func flipImageHorizontally(_ image: UIImage) -> UIImage? {
         let format = UIGraphicsImageRendererFormat()
         format.scale = image.scale
-        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        let size = image.size
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
         return renderer.image { context in
-            context.cgContext.translateBy(x: image.size.width, y: 0)
+            context.cgContext.translateBy(x: size.width, y: 0)
             context.cgContext.scaleBy(x: -1.0, y: 1.0)
-            image.draw(in: CGRect(origin: .zero, size: image.size))
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

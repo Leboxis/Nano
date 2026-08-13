@@ -4,9 +4,9 @@ struct SettingsView: View {
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var cameraManager: CameraManager
 
-    @AppStorage("photoMegapixels") private var photoMegapixels: Int = 12
-    @AppStorage("videoQuality") private var videoQuality: String = "1080p"
-    @AppStorage("videoFPS") private var videoFPS: Int = 30
+    @AppStorage("photoMegapixels") private var photoMegapixels: Int = 24
+    @AppStorage("videoQuality") private var videoQuality: String = "4K"
+    @AppStorage("videoFPS") private var videoFPS: Int = 60
 
     private let megapixelOptions = [8, 12, 24, 48]
     private let videoQualityOptions = ["480p", "720p", "1080p", "4K"]

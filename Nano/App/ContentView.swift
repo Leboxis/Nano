@@ -22,15 +22,15 @@ struct ContentView: View {
         .ignoresSafeArea()
         .onChange(of: selectedTab) { newTab in
             if newTab == 1 {
-                // Camera page: dim to minimum
+                // Camera page: dim to 0%
                 UIScreen.main.brightness = 0.0
             } else {
-                // Gallery or Settings: 50% brightness
-                UIScreen.main.brightness = 0.5
+                // Gallery or Settings: 75% brightness
+                UIScreen.main.brightness = 0.75
             }
         }
         .onAppear {
-            // Start on camera = dim
+            // Start on camera = 0% brightness
             UIScreen.main.brightness = 0.0
         }
     }
