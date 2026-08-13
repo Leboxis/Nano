@@ -11,6 +11,7 @@ class CameraManager: NSObject, ObservableObject {
     private var photoOutput: AVCapturePhotoOutput?
     private var movieOutput: AVCaptureMovieFileOutput?
     private var currentCamera: AVCaptureDevice?
+    private var currentVideoInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
 
     private let sessionQueue = DispatchQueue(label: "com.nano.camera.session")
@@ -25,6 +26,9 @@ class CameraManager: NSObject, ObservableObject {
     @AppStorage("photoMegapixels") private var photoMegapixels: Int = 12
     @AppStorage("videoQuality") private var videoQuality: String = "1080p"
     @AppStorage("lastMode") private var lastMode: String = "photo"
+    @AppStorage("zoomLevel") private var zoomLevel: Int = 1
+    @AppStorage("vibrationsEnabled") private var vibrationsEnabled: Bool = true
+    @AppStorage("useFrontCamera") private var useFrontCamera: Bool = false
 
     override init() {
         super.init()
@@ -66,8 +70,9 @@ class CameraManager: NSObject, ObservableObject {
             session.beginConfiguration()
 
             // Camera input
-            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-                print("CameraManager: No back camera available")
+            let position: AVCaptureDevice.Position = self.useFrontCamera ? .front : .back
+            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
+                print("CameraManager: No camera available for position \(position)")
                 session.commitConfiguration()
                 return
             }
@@ -77,6 +82,7 @@ class CameraManager: NSObject, ObservableObject {
                 let videoInput = try AVCaptureDeviceInput(device: camera)
                 if session.canAddInput(videoInput) {
                     session.addInput(videoInput)
+                    self.currentVideoInput = videoInput
                 }
             } catch {
                 print("CameraManager: Failed to create video input: \(error)")
@@ -115,6 +121,9 @@ class CameraManager: NSObject, ObservableObject {
             self.configureSessionPreset(session: session)
             session.commitConfiguration()
             self.captureSession = session
+
+            // Apply zoom
+            self.applyZoom()
         }
     }
 
@@ -191,6 +200,96 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Zoom
+
+    func applyZoom() {
+        sessionQueue.async { [weak self] in
+            guard let self = self, let camera = self.currentCamera else { return }
+
+            let desiredZoom = CGFloat(self.zoomLevel)
+            let maxZoom = min(camera.activeFormat.videoMaxZoomFactor, 10.0)
+            let clampedZoom = min(desiredZoom, maxZoom)
+
+            do {
+                try camera.lockForConfiguration()
+                camera.videoZoomFactor = max(1.0, clampedZoom)
+                camera.unlockForConfiguration()
+            } catch {
+                print("CameraManager: Failed to set zoom: \(error)")
+            }
+        }
+    }
+
+    func updateZoom(_ level: Int) {
+        zoomLevel = level
+        applyZoom()
+    }
+
+    // MARK: - Camera Switch (Front/Back)
+
+    func switchCamera(toFront: Bool) {
+        useFrontCamera = toFront
+
+        sessionQueue.async { [weak self] in
+            guard let self = self, let session = self.captureSession else { return }
+
+            session.beginConfiguration()
+
+            // Remove current video input
+            if let currentInput = self.currentVideoInput {
+                session.removeInput(currentInput)
+            }
+
+            // Get new camera
+            let position: AVCaptureDevice.Position = toFront ? .front : .back
+            guard let newCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
+                print("CameraManager: No camera for position \(position)")
+                session.commitConfiguration()
+                return
+            }
+
+            do {
+                let newInput = try AVCaptureDeviceInput(device: newCamera)
+                if session.canAddInput(newInput) {
+                    session.addInput(newInput)
+                    self.currentVideoInput = newInput
+                    self.currentCamera = newCamera
+                }
+            } catch {
+                print("CameraManager: Failed to switch camera: \(error)")
+            }
+
+            session.commitConfiguration()
+
+            // Re-apply zoom on new camera
+            self.applyZoom()
+        }
+    }
+
+    // MARK: - Haptics
+
+    private func triggerHaptic(style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        guard vibrationsEnabled else { return }
+        DispatchQueue.main.async {
+            let generator = UIImpactFeedbackGenerator(style: style)
+            generator.prepare()
+            generator.impactOccurred()
+        }
+    }
+
+    private func triggerStopRecordingHaptics() {
+        guard vibrationsEnabled else { return }
+        DispatchQueue.main.async {
+            let generator = UIImpactFeedbackGenerator(style: .heavy)
+            generator.prepare()
+            for i in 0..<4 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.15) {
+                    generator.impactOccurred()
+                }
+            }
+        }
+    }
+
     // MARK: - Photo Capture
 
     func capturePhoto() {
@@ -210,11 +309,7 @@ class CameraManager: NSObject, ObservableObject {
         }
 
         // Haptic feedback
-        DispatchQueue.main.async {
-            let generator = UIImpactFeedbackGenerator(style: .light)
-            generator.prepare()
-            generator.impactOccurred()
-        }
+        triggerHaptic(style: .light)
     }
 
     private func photoDimensions() -> CMVideoDimensions? {
@@ -254,11 +349,7 @@ class CameraManager: NSObject, ObservableObject {
         guard let movieOutput = movieOutput, !isRecording else { return }
 
         // Single vibration to signal recording started
-        DispatchQueue.main.async {
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.prepare()
-            generator.impactOccurred()
-        }
+        triggerHaptic(style: .medium)
 
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
@@ -316,16 +407,10 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
                     error: Error?) {
         DispatchQueue.main.async { [weak self] in
             self?.isRecording = false
-
-            // 4 rapid vibrations to signal recording stopped
-            let generator = UIImpactFeedbackGenerator(style: .heavy)
-            generator.prepare()
-            for i in 0..<4 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.15) {
-                    generator.impactOccurred()
-                }
-            }
         }
+
+        // 4 rapid vibrations to signal recording stopped
+        triggerStopRecordingHaptics()
 
         if let error = error {
             print("CameraManager: Recording error: \(error)")

@@ -9,6 +9,7 @@ struct SettingsView: View {
 
     private let megapixelOptions = [8, 12, 24, 48]
     private let videoQualityOptions = ["480p", "720p", "1080p", "4K"]
+    private let zoomOptions = [1, 2, 3]
 
     var body: some View {
         ZStack {
@@ -38,6 +39,59 @@ struct SettingsView: View {
                         .pickerStyle(.segmented)
                     }
 
+                    // Camera Section
+                    settingsSection(title: "Caméra") {
+                        VStack(alignment: .leading, spacing: 20) {
+                            // Front / Back camera
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Objectif")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(Color.white.opacity(0.6))
+
+                                HStack(spacing: 0) {
+                                    optionButton(
+                                        label: "Arrière",
+                                        isSelected: !settings.useFrontCamera,
+                                        action: {
+                                            settings.useFrontCamera = false
+                                            cameraManager.switchCamera(toFront: false)
+                                        }
+                                    )
+                                    optionButton(
+                                        label: "Avant",
+                                        isSelected: settings.useFrontCamera,
+                                        action: {
+                                            settings.useFrontCamera = true
+                                            cameraManager.switchCamera(toFront: true)
+                                        }
+                                    )
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+
+                            // Zoom
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Zoom")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(Color.white.opacity(0.6))
+
+                                HStack(spacing: 0) {
+                                    ForEach(zoomOptions, id: \.self) { level in
+                                        optionButton(
+                                            label: "x\(level)",
+                                            isSelected: settings.zoomLevel == level,
+                                            action: {
+                                                settings.zoomLevel = level
+                                                cameraManager.updateZoom(level)
+                                            }
+                                        )
+                                    }
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+
                     // Photo Settings
                     if settings.captureMode == .photo {
                         settingsSection(title: "Photo") {
@@ -48,22 +102,14 @@ struct SettingsView: View {
 
                                 HStack(spacing: 0) {
                                     ForEach(megapixelOptions, id: \.self) { mp in
-                                        Button(action: {
-                                            photoMegapixels = mp
-                                            cameraManager.refreshConfiguration()
-                                        }) {
-                                            Text("\(mp) MP")
-                                                .font(.system(size: 13, weight: .semibold))
-                                                .foregroundColor(photoMegapixels == mp ? .black : .white)
-                                                .frame(maxWidth: .infinity)
-                                                .padding(.vertical, 10)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 8)
-                                                        .fill(photoMegapixels == mp
-                                                              ? Color.white
-                                                              : Color.white.opacity(0.08))
-                                                )
-                                        }
+                                        optionButton(
+                                            label: "\(mp) MP",
+                                            isSelected: photoMegapixels == mp,
+                                            action: {
+                                                photoMegapixels = mp
+                                                cameraManager.refreshConfiguration()
+                                            }
+                                        )
                                     }
                                 }
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -81,27 +127,37 @@ struct SettingsView: View {
 
                                 HStack(spacing: 0) {
                                     ForEach(videoQualityOptions, id: \.self) { quality in
-                                        Button(action: {
-                                            videoQuality = quality
-                                            cameraManager.refreshConfiguration()
-                                        }) {
-                                            Text(quality)
-                                                .font(.system(size: 13, weight: .semibold))
-                                                .foregroundColor(videoQuality == quality ? .black : .white)
-                                                .frame(maxWidth: .infinity)
-                                                .padding(.vertical, 10)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 8)
-                                                        .fill(videoQuality == quality
-                                                              ? Color.white
-                                                              : Color.white.opacity(0.08))
-                                                )
-                                        }
+                                        optionButton(
+                                            label: quality,
+                                            isSelected: videoQuality == quality,
+                                            action: {
+                                                videoQuality = quality
+                                                cameraManager.refreshConfiguration()
+                                            }
+                                        )
                                     }
                                 }
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                         }
+                    }
+
+                    // Vibrations
+                    settingsSection(title: "Retour haptique") {
+                        Toggle(isOn: $settings.vibrationsEnabled) {
+                            HStack {
+                                Image(systemName: settings.vibrationsEnabled
+                                      ? "iphone.radiowaves.left.and.right"
+                                      : "iphone.slash")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(Color.white.opacity(0.6))
+                                    .frame(width: 24)
+                                Text("Vibrations")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .tint(Color.white)
                     }
 
                     // App Info
@@ -135,6 +191,22 @@ struct SettingsView: View {
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Color.white.opacity(0.05))
+                )
+        }
+    }
+
+    private func optionButton(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(isSelected ? .black : .white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isSelected
+                              ? Color.white
+                              : Color.white.opacity(0.08))
                 )
         }
     }
