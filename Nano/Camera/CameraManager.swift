@@ -443,7 +443,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Photo Capture (Native HEIC, 16:9, High-Res Sensor)
+    // MARK: - Photo Capture (Native HEIC, Upright 16:9, High-Res Sensor)
 
     func capturePhoto() {
         guard let photoOutput = photoOutput else {
@@ -464,7 +464,6 @@ class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings()
             }
 
-            // Balanced prioritization preserves full sensor megapixel resolution
             settings.photoQualityPrioritization = .balanced
 
             let dims = self.photoDimensionsForMP(self.photoMegapixels)
@@ -594,9 +593,9 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         if let error = error {
             print("CameraManager: Photo capture error: \(error)")
         } else if let rawData = photo.fileDataRepresentation(), let image = UIImage(data: rawData) {
-            // Crop image to 16:9 ratio while preserving sensor orientation
-            let croppedImage = cropTo16By9(image) ?? image
-            let heicData = exportToHEIC(image: croppedImage, compressionQuality: 0.95) ?? rawData
+            // Normalize orientation to upright portrait, then crop to 9:16 portrait ratio
+            let uprightCropped = normalizeAndCropTo16By9(image)
+            let heicData = exportToHEIC(image: uprightCropped, compressionQuality: 0.95) ?? rawData
 
             galleryStore?.savePhoto(data: heicData)
         }
@@ -609,26 +608,43 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         }
     }
 
-    private func cropTo16By9(_ image: UIImage) -> UIImage? {
-        guard let cgImage = image.cgImage else { return nil }
-        let width = CGFloat(cgImage.width)
-        let height = CGFloat(cgImage.height)
-
-        // Portrait orientation: 9:16 aspect ratio (targetHeight = width * 16 / 9)
-        let targetHeight = width * (16.0 / 9.0)
-
-        let cropRect: CGRect
-        if targetHeight <= height {
-            let offsetY = (height - targetHeight) / 2.0
-            cropRect = CGRect(x: 0, y: offsetY, width: width, height: targetHeight)
+    private func normalizeAndCropTo16By9(_ image: UIImage) -> UIImage {
+        // 1. Redraw image into upright orientation (.up), resolving sensor EXIF rotation and front camera mirroring
+        let uprightSize: CGSize
+        if image.imageOrientation == .right || image.imageOrientation == .left ||
+           image.imageOrientation == .rightMirrored || image.imageOrientation == .leftMirrored {
+            uprightSize = CGSize(width: image.size.height, height: image.size.width)
         } else {
-            let targetWidth = height * (9.0 / 16.0)
-            let offsetX = (width - targetWidth) / 2.0
-            cropRect = CGRect(x: offsetX, y: 0, width: targetWidth, height: height)
+            uprightSize = image.size
         }
 
-        guard let croppedCG = cgImage.cropping(to: cropRect) else { return nil }
-        return UIImage(cgImage: croppedCG, scale: image.scale, orientation: image.imageOrientation)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+
+        let renderer = UIGraphicsImageRenderer(size: uprightSize, format: format)
+        let uprightImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: uprightSize))
+        }
+
+        // 2. Crop upright portrait image to 9:16 ratio (width x height)
+        guard let cgImage = uprightImage.cgImage else { return uprightImage }
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+
+        let targetH = w * (16.0 / 9.0)
+
+        let cropRect: CGRect
+        if targetH <= h {
+            let offsetY = (h - targetH) / 2.0
+            cropRect = CGRect(x: 0, y: offsetY, width: w, height: targetH)
+        } else {
+            let targetW = h * (9.0 / 16.0)
+            let offsetX = (w - targetW) / 2.0
+            cropRect = CGRect(x: offsetX, y: 0, width: targetW, height: h)
+        }
+
+        guard let croppedCG = cgImage.cropping(to: cropRect) else { return uprightImage }
+        return UIImage(cgImage: croppedCG, scale: 1.0, orientation: .up)
     }
 
     private func exportToHEIC(image: UIImage, compressionQuality: CGFloat = 0.95) -> Data? {
