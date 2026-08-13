@@ -20,7 +20,7 @@ class CameraManager: NSObject, ObservableObject {
 
     weak var galleryStore: GalleryStore?
 
-    // Native Burst
+    // Burst
     private var isBursting = false
 
     override init() {
@@ -101,6 +101,18 @@ class CameraManager: NSObject, ObservableObject {
             let session = AVCaptureSession()
             session.beginConfiguration()
             session.automaticallyConfiguresApplicationAudioSession = false
+
+            // Explicitly allow haptics & system sounds during recording
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playAndRecord, mode: .videoRecording, options: [.mixWithOthers, .defaultToSpeaker])
+                if #available(iOS 13.0, *) {
+                    try audioSession.setAllowHapticsAndSystemSoundsDuringRecording(true)
+                }
+                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            } catch {
+                print("CameraManager: Failed to configure audio session: \(error)")
+            }
 
             // Camera input
             let position: AVCaptureDevice.Position = self.useFrontCamera ? .front : .back
@@ -394,6 +406,43 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Haptic Feedback
+
+    private func triggerHaptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
+        guard vibrationsEnabled else { return }
+        DispatchQueue.main.async {
+            let generator = UIImpactFeedbackGenerator(style: style)
+            generator.prepare()
+            generator.impactOccurred()
+
+            // Trigger system haptic audio sounds
+            switch style {
+            case .light, .soft:
+                AudioServicesPlaySystemSound(1519)
+            case .medium, .rigid:
+                AudioServicesPlaySystemSound(1520)
+            case .heavy:
+                AudioServicesPlaySystemSound(1521)
+            @unknown default:
+                AudioServicesPlaySystemSound(1520)
+            }
+        }
+    }
+
+    private func triggerBurstStopHaptic() {
+        guard vibrationsEnabled else { return }
+        DispatchQueue.main.async {
+            for i in 0..<4 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.12) {
+                    let generator = UIImpactFeedbackGenerator(style: .heavy)
+                    generator.prepare()
+                    generator.impactOccurred()
+                    AudioServicesPlaySystemSound(1521)
+                }
+            }
+        }
+    }
+
     // MARK: - Photo Capture
 
     func capturePhoto() {
@@ -402,9 +451,7 @@ class CameraManager: NSObject, ObservableObject {
             return
         }
 
-        if vibrationsEnabled {
-            HapticManager.shared.playTap()
-        }
+        triggerHaptic(.medium)
 
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
@@ -419,6 +466,7 @@ class CameraManager: NSObject, ObservableObject {
                 settings.maxPhotoDimensions = CMVideoDimensions(width: targetWidth, height: targetHeight)
             }
 
+            // Configure native AVFoundation photo mirroring for front camera (identical to video)
             if let connection = photoOutput.connection(with: .video) {
                 if connection.isVideoOrientationSupported {
                     connection.videoOrientation = .portrait
@@ -456,20 +504,15 @@ class CameraManager: NSObject, ObservableObject {
 
     func stopBurst() {
         isBursting = false
-        if vibrationsEnabled {
-            HapticManager.shared.playBurstStop()
-        }
+        triggerBurstStopHaptic()
     }
 
     private func captureNextBurstPhoto() {
         guard isBursting, let photoOutput = photoOutput else { return }
 
-        if vibrationsEnabled {
-            HapticManager.shared.playTap()
-        }
+        triggerHaptic(.light)
 
         let settings = AVCapturePhotoSettings()
-        // Speed quality prioritization enables native hardware burst mode
         settings.photoQualityPrioritization = .speed
 
         if let connection = photoOutput.connection(with: .video) {
@@ -490,9 +533,7 @@ class CameraManager: NSObject, ObservableObject {
     func startRecording() {
         guard let movieOutput = movieOutput, !isRecording else { return }
 
-        if vibrationsEnabled {
-            HapticManager.shared.playHeavy()
-        }
+        triggerHaptic(.heavy)
 
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
@@ -539,50 +580,16 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      error: Error?) {
         if let error = error {
             print("CameraManager: Photo capture error: \(error)")
-        } else if var data = photo.fileDataRepresentation() {
-            // If front camera, physically flip JPEG image data horizontally (left-right)
-            if useFrontCamera, let image = UIImage(data: data) {
-                if let mirroredImage = flipImageHorizontally(image), let jpegData = mirroredImage.jpegData(compressionQuality: 0.95) {
-                    data = jpegData
-                }
-            }
+        } else if let data = photo.fileDataRepresentation() {
+            // Natively mirrored photo saved directly
             galleryStore?.savePhoto(data: data)
         }
 
-        // If native burst is active, trigger next hardware frame immediately
+        // If native burst is active, trigger next frame immediately
         if isBursting {
             sessionQueue.async { [weak self] in
                 self?.captureNextBurstPhoto()
             }
-        }
-    }
-
-    private func flipImageHorizontally(_ image: UIImage) -> UIImage? {
-        guard let normalized = image.fixOrientation() else { return nil }
-        let size = normalized.size
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = normalized.scale
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        return renderer.image { context in
-            context.cgContext.translateBy(x: size.width, y: 0)
-            context.cgContext.scaleBy(x: -1.0, y: 1.0)
-            normalized.draw(in: CGRect(origin: .zero, size: size))
-        }
-    }
-}
-
-// MARK: - UIImage Extension
-
-extension UIImage {
-    func fixOrientation() -> UIImage? {
-        if self.imageOrientation == .up {
-            return self
-        }
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = self.scale
-        let renderer = UIGraphicsImageRenderer(size: self.size, format: format)
-        return renderer.image { _ in
-            self.draw(in: CGRect(origin: .zero, size: self.size))
         }
     }
 }
@@ -596,10 +603,7 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
                     error: Error?) {
         DispatchQueue.main.async { [weak self] in
             self?.isRecording = false
-
-            if self?.vibrationsEnabled == true {
-                HapticManager.shared.playBurstStop()
-            }
+            self?.triggerBurstStopHaptic()
         }
 
         if let error = error {

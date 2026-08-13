@@ -16,10 +16,13 @@ struct NanoApp: App {
                 .environmentObject(settings)
                 .preferredColorScheme(.dark)
                 .onAppear {
-                    // Configure AVAudioSession to allow haptics/vibrations while camera & mic are active
+                    // Configure AVAudioSession to ALLOW haptics and system sounds during recording (iOS 13+)
                     do {
                         let audioSession = AVAudioSession.sharedInstance()
-                        try audioSession.setCategory(.playAndRecord, options: [.mixWithOthers, .defaultToSpeaker])
+                        try audioSession.setCategory(.playAndRecord, mode: .videoRecording, options: [.mixWithOthers, .defaultToSpeaker])
+                        if #available(iOS 13.0, *) {
+                            try audioSession.setAllowHapticsAndSystemSoundsDuringRecording(true)
+                        }
                         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
                     } catch {
                         print("NanoApp: Failed to configure AVAudioSession: \(error)")

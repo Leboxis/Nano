@@ -11,15 +11,11 @@ struct ItemFramePreferenceKey: PreferenceKey {
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
 
-    @Binding var isSelecting: Bool
+    @State private var isSelecting = false
     @State private var selectedIds: Set<UUID> = []
     @State private var previewItem: MediaItem? = nil
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var startRow: Int? = nil
-
-    init(isSelecting: Binding<Bool> = .constant(false)) {
-        self._isSelecting = isSelecting
-    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -41,97 +37,76 @@ struct GalleryView: View {
                 if galleryStore.items.isEmpty {
                     emptyState
                 } else {
-                    GeometryReader { outerGeo in
-                        ScrollViewReader { scrollProxy in
-                            ScrollView {
-                                LazyVGrid(columns: columns, spacing: 2) {
-                                    ForEach(Array(galleryStore.items.enumerated()), id: \.element.id) { index, item in
-                                        ThumbnailCell(
-                                            item: item,
-                                            isSelecting: isSelecting,
-                                            isSelected: selectedIds.contains(item.id),
-                                            galleryStore: galleryStore
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 2) {
+                            ForEach(Array(galleryStore.items.enumerated()), id: \.element.id) { index, item in
+                                ThumbnailCell(
+                                    item: item,
+                                    isSelecting: isSelecting,
+                                    isSelected: selectedIds.contains(item.id),
+                                    galleryStore: galleryStore
+                                )
+                                .id(item.id)
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: ItemFramePreferenceKey.self,
+                                            value: [item.id: geo.frame(in: .named("galleryScrollView"))]
                                         )
-                                        .id(item.id)
-                                        .background(
-                                            GeometryReader { geo in
-                                                Color.clear.preference(
-                                                    key: ItemFramePreferenceKey.self,
-                                                    value: [item.id: geo.frame(in: .named("galleryScrollView"))]
-                                                )
-                                            }
-                                        )
-                                        .onTapGesture {
-                                            if isSelecting {
-                                                toggleSelection(item.id)
-                                            } else {
-                                                previewItem = item
-                                            }
-                                        }
+                                    }
+                                )
+                                .onTapGesture {
+                                    if isSelecting {
+                                        toggleSelection(item.id)
+                                    } else {
+                                        previewItem = item
                                     }
                                 }
                             }
-                            .coordinateSpace(name: "galleryScrollView")
-                            .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
-                                self.itemFrames = frames
-                            }
-                            .simultaneousGesture(
-                                isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
-                                    .onChanged { gesture in
-                                        let loc = gesture.location
-
-                                        // Find index of item under finger
-                                        if let matchedIndex = galleryStore.items.firstIndex(where: { itemFrames[$0.id]?.contains(loc) == true }) {
-                                            let matchedItem = galleryStore.items[matchedIndex]
-                                            let currentRow = matchedIndex / 3
-
-                                            if startRow == nil {
-                                                startRow = currentRow
-                                                // On initial touch, select ONLY the touched item, NOT the whole row
-                                                selectedIds.insert(matchedItem.id)
-                                            } else if currentRow != startRow {
-                                                // When finger moves to an adjacent/new row, select ALL items in that new row and intermediate rows
-                                                let initialRow = startRow!
-                                                let fromRow = min(initialRow, currentRow)
-                                                let toRow = max(initialRow, currentRow)
-
-                                                for r in fromRow...toRow {
-                                                    let firstInRow = r * 3
-                                                    let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
-                                                    if firstInRow <= lastInRow {
-                                                        for i in firstInRow...lastInRow {
-                                                            selectedIds.insert(galleryStore.items[i].id)
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                // Same row as start: select individual item touched
-                                                selectedIds.insert(matchedItem.id)
-                                            }
-                                        }
-
-                                        // Edge Auto-scroll
-                                        let containerH = outerGeo.size.height
-                                        if loc.y < 80 {
-                                            if let firstId = galleryStore.items.first?.id {
-                                                withAnimation(.linear(duration: 0.15)) {
-                                                    scrollProxy.scrollTo(firstId, anchor: .top)
-                                                }
-                                            }
-                                        } else if loc.y > containerH - 80 {
-                                            if let lastId = galleryStore.items.last?.id {
-                                                withAnimation(.linear(duration: 0.15)) {
-                                                    scrollProxy.scrollTo(lastId, anchor: .bottom)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .onEnded { _ in
-                                        startRow = nil
-                                    } : nil
-                            )
                         }
                     }
+                    .coordinateSpace(name: "galleryScrollView")
+                    .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
+                        self.itemFrames = frames
+                    }
+                    .simultaneousGesture(
+                        isSelecting ? DragGesture(minimumDistance: 10, coordinateSpace: .named("galleryScrollView"))
+                            .onChanged { gesture in
+                                let loc = gesture.location
+
+                                if let matchedIndex = galleryStore.items.firstIndex(where: { itemFrames[$0.id]?.contains(loc) == true }) {
+                                    let matchedItem = galleryStore.items[matchedIndex]
+                                    let currentRow = matchedIndex / 3
+
+                                    if startRow == nil {
+                                        startRow = currentRow
+                                        // Select only single touched item in initial row
+                                        selectedIds.insert(matchedItem.id)
+                                    } else if currentRow != startRow {
+                                        // Moving to adjacent or new row: select all items in new rows
+                                        let initialRow = startRow!
+                                        let fromRow = min(initialRow, currentRow)
+                                        let toRow = max(initialRow, currentRow)
+
+                                        for r in fromRow...toRow {
+                                            let firstInRow = r * 3
+                                            let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
+                                            if firstInRow <= lastInRow {
+                                                for i in firstInRow...lastInRow {
+                                                    selectedIds.insert(galleryStore.items[i].id)
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Same row: select touched item
+                                        selectedIds.insert(matchedItem.id)
+                                    }
+                                }
+                            }
+                            .onEnded { _ in
+                                startRow = nil
+                            } : nil
+                    )
 
                     // Selection toolbar
                     if isSelecting {
