@@ -12,16 +12,12 @@ struct ItemFramePreferenceKey: PreferenceKey {
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
 
-    @Binding var isSelecting: Bool
+    @State private var isSelecting = false
     @State private var selectedIds: Set<UUID> = []
     @State private var previewItem: MediaItem? = nil
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var startRow: Int? = nil
     @State private var isUnlocked = false
-
-    init(isSelecting: Binding<Bool> = .constant(false)) {
-        self._isSelecting = isSelecting
-    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
