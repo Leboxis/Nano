@@ -253,6 +253,13 @@ class CameraManager: NSObject, ObservableObject {
     func startRecording() {
         guard let movieOutput = movieOutput, !isRecording else { return }
 
+        // Single vibration to signal recording started
+        DispatchQueue.main.async {
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.prepare()
+            generator.impactOccurred()
+        }
+
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
 
@@ -310,10 +317,14 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.isRecording = false
 
-            // Strong vibration to signal recording stopped
-            let generator = UINotificationFeedbackGenerator()
+            // 4 rapid vibrations to signal recording stopped
+            let generator = UIImpactFeedbackGenerator(style: .heavy)
             generator.prepare()
-            generator.notificationOccurred(.success)
+            for i in 0..<4 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.15) {
+                    generator.impactOccurred()
+                }
+            }
         }
 
         if let error = error {
