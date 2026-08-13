@@ -4,13 +4,12 @@ struct CameraView: View {
     @EnvironmentObject var cameraManager: CameraManager
     @EnvironmentObject var settings: AppSettings
 
-    @State private var isLongPressing = false
+    @State private var isBursting = false
 
     var body: some View {
         ZStack {
             // Completely black background
             Color.black
-                .ignoresSafeArea()
 
             // Recording indicator (top right, pulsing red dot)
             if cameraManager.isRecording {
@@ -26,6 +25,7 @@ struct CameraView: View {
                     }
                     Spacer()
                 }
+                .allowsHitTesting(false)
             }
 
             // Mode indicator (bottom center)
@@ -34,38 +34,27 @@ struct CameraView: View {
                 modeIndicator
                     .padding(.bottom, 50)
             }
+            .allowsHitTesting(false)
         }
-        .contentShape(Rectangle()) // Make entire area tappable
-        .gesture(
-            // Combined gesture: tap and long press
-            LongPressGesture(minimumDuration: 0.5)
-                .onChanged { _ in
-                    // Long press began (finger held)
-                }
-                .onEnded { _ in
-                    handleLongPressStart()
-                }
-                .simultaneously(with:
-                    TapGesture()
-                        .onEnded {
-                            handleTap()
-                        }
-                )
-        )
-        .onChange(of: isLongPressing) { pressing in
-            if !pressing {
-                handleLongPressEnd()
-            }
+        .ignoresSafeArea()
+        // Use onTapGesture — does NOT block TabView horizontal swipe
+        .onTapGesture {
+            handleTap()
         }
+        // Long press for burst — pressing callback tracks press state
         .onLongPressGesture(minimumDuration: 0.5, pressing: { pressing in
             if settings.captureMode == .photo {
-                if pressing {
-                    handleLongPressStart()
-                } else {
-                    handleLongPressEnd()
+                if pressing && !isBursting {
+                    isBursting = true
+                    cameraManager.startBurst()
+                } else if !pressing && isBursting {
+                    isBursting = false
+                    cameraManager.stopBurst()
                 }
             }
-        }, perform: {})
+        }, perform: {
+            // Long press completed — burst already started via pressing callback
+        })
         .statusBarHidden(true)
     }
 
@@ -77,8 +66,11 @@ struct CameraView: View {
             Circle()
                 .fill(settings.captureMode == .photo ? Color.white : Color.red)
                 .frame(width: 8, height: 8)
-                .modifier(settings.captureMode == .video && cameraManager.isRecording
-                          ? PulsingModifier() : PulsingModifier(enabled: false))
+                .modifier(
+                    PulsingModifier(
+                        enabled: settings.captureMode == .video && cameraManager.isRecording
+                    )
+                )
 
             Text(settings.captureMode == .photo ? "PHOTO" : "VIDÉO")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -100,18 +92,6 @@ struct CameraView: View {
                 cameraManager.startRecording()
             }
         }
-    }
-
-    private func handleLongPressStart() {
-        guard settings.captureMode == .photo, !isLongPressing else { return }
-        isLongPressing = true
-        cameraManager.startBurst()
-    }
-
-    private func handleLongPressEnd() {
-        guard isLongPressing else { return }
-        isLongPressing = false
-        cameraManager.stopBurst()
     }
 }
 

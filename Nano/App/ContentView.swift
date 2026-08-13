@@ -18,7 +18,7 @@ struct ContentView: View {
                 .tag(2)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .ignoresSafeArea()
         .background(Color.black)
+        .ignoresSafeArea()
     }
 }
