@@ -10,19 +10,29 @@ struct KDriveUploadSheet: View {
     @State private var uploadFinished = false
     @State private var successCount = 0
     @State private var failedCount = 0
-    @State private var statusMessage: String = "Préparation de l'envoi..."
 
     var body: some View {
         ZStack {
             Color(red: 0.08, green: 0.08, blue: 0.08)
                 .ignoresSafeArea()
 
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 // Header Bar
                 HStack {
-                    Text("Infomaniak kDrive")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Infomaniak kDrive")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(Color(red: 0.2, green: 0.6, blue: 1.0))
+                            Text(settings.kDriveDirectoryName.isEmpty ? "Racine (kDrive)" : settings.kDriveDirectoryName)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.white.opacity(0.6))
+                        }
+                    }
 
                     Spacer()
 
@@ -62,7 +72,7 @@ struct KDriveUploadSheet: View {
                             .multilineTextAlignment(.center)
 
                         VStack(spacing: 6) {
-                            Text("\(successCount) média\(successCount > 1 ? "s" : "") envoyé\(successCount > 1 ? "s" : "") vers kDrive")
+                            Text("\(successCount) média\(successCount > 1 ? "s" : "") envoyé\(successCount > 1 ? "s" : "") vers \"\(settings.kDriveDirectoryName.isEmpty ? "Racine" : settings.kDriveDirectoryName)\"")
                                 .font(.system(size: 14))
                                 .foregroundColor(Color.white.opacity(0.7))
 
@@ -159,7 +169,7 @@ struct KDriveUploadSheet: View {
                 }
             }
         }
-        .presentationDetents([.fraction(0.55)])
+        .presentationDetents([.fraction(0.58)])
         .presentationDragIndicator(.visible)
         .onAppear {
             startUpload()

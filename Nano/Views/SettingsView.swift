@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var isTestingConnection = false
     @State private var connectionStatus: ConnectionStatus? = nil
     @State private var showToken = false
+    @State private var showFolderPicker = false
 
     private let megapixelOptions = [8, 12, 24, 48]
     private let videoQualityOptions = ["480p", "720p", "1080p", "4K"]
@@ -160,21 +161,36 @@ struct SettingsView: View {
                                     .keyboardType(.numberPad)
                             }
 
-                            // Directory ID
+                            // Directory / Folder Selection
                             VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text("ID du dossier cible")
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundColor(Color.white.opacity(0.6))
-                                    Spacer()
-                                    Text("1 = Racine")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(Color.white.opacity(0.35))
-                                }
+                                Text("Dossier de destination")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(Color.white.opacity(0.6))
 
-                                TextField("1", text: $settings.kDriveDirectoryId)
-                                    .textFieldStyle(CustomDarkTextFieldStyle())
-                                    .keyboardType(.numberPad)
+                                Button(action: {
+                                    showFolderPicker = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "folder.fill")
+                                            .foregroundColor(Color(red: 0.2, green: 0.6, blue: 1.0))
+                                        Text(settings.kDriveDirectoryName.isEmpty ? "Racine (kDrive)" : settings.kDriveDirectoryName)
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                        Text("ID: \(settings.kDriveDirectoryId)")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(Color.white.opacity(0.35))
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(Color.white.opacity(0.3))
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(Color.white.opacity(0.06))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                .disabled(!settings.isKDriveConfigured)
+                                .opacity(settings.isKDriveConfigured ? 1.0 : 0.4)
                             }
 
                             // Test Connection Button
@@ -235,6 +251,10 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 24)
             }
+        }
+        .sheet(isPresented: $showFolderPicker) {
+            KDriveFolderPickerView()
+                .environmentObject(settings)
         }
         .statusBarHidden(true)
     }

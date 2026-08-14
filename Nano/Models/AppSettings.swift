@@ -22,7 +22,7 @@ class AppSettings: ObservableObject {
     @AppStorage("kDriveApiToken") var kDriveApiToken: String = ""
     @AppStorage("kDriveId") var kDriveId: String = ""
     @AppStorage("kDriveDirectoryId") var kDriveDirectoryId: String = "1"
-    @AppStorage("kDriveFolderName") var kDriveFolderName: String = "Nano"
+    @AppStorage("kDriveDirectoryName") var kDriveDirectoryName: String = "Racine (kDrive)"
 
     var isKDriveConfigured: Bool {
         !kDriveApiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
