@@ -15,8 +15,12 @@ enum CaptureMode: String, CaseIterable {
 
 class AppSettings: ObservableObject {
     @AppStorage("lastMode") var lastMode: String = "photo"
-    @AppStorage("photoMegapixels") var photoMegapixels: Int = 12
-    @AppStorage("videoQuality") var videoQuality: String = "1080p"
+    @AppStorage("photoMegapixels") var photoMegapixels: Int = 24
+    @AppStorage("videoQuality") var videoQuality: String = "4K"
+    @AppStorage("videoFPS") var videoFPS: Int = 60
+    @AppStorage("zoomLevel") var zoomLevel: Int = 1
+    @AppStorage("vibrationsEnabled") var vibrationsEnabled: Bool = true
+    @AppStorage("useFrontCamera") var useFrontCamera: Bool = false
 
     // MARK: - Infomaniak kDrive Settings
     @AppStorage("kDriveApiToken") var kDriveApiToken: String = ""

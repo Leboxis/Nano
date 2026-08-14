@@ -8,17 +8,30 @@ struct ContentView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            GalleryView()
+            GalleryView(selectedTab: $selectedTab)
                 .tag(0)
 
-            CameraView()
+            CameraView(selectedTab: $selectedTab)
                 .tag(1)
 
             SettingsView()
                 .tag(2)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .ignoresSafeArea()
         .background(Color.black)
+        .ignoresSafeArea()
+        .onChange(of: selectedTab) { newTab in
+            if newTab == 1 {
+                // Camera page: 0% brightness
+                UIScreen.main.brightness = 0.0
+            } else {
+                // Gallery or Settings: 75% brightness
+                UIScreen.main.brightness = 0.75
+            }
+        }
+        .onAppear {
+            // Start on camera = 0% brightness
+            UIScreen.main.brightness = 0.0
+        }
     }
 }

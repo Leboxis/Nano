@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 @main
 struct NanoApp: App {
@@ -7,7 +8,8 @@ struct NanoApp: App {
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var settings = AppSettings()
 
-    private var originalBrightness: CGFloat = UIScreen.main.brightness
+    // Store original system brightness before opening app
+    @State private var originalSystemBrightness: CGFloat = UIScreen.main.brightness
 
     var body: some Scene {
         WindowGroup {
@@ -17,12 +19,24 @@ struct NanoApp: App {
                 .environmentObject(settings)
                 .preferredColorScheme(.dark)
                 .onAppear {
+                    // Save initial brightness
+                    originalSystemBrightness = UIScreen.main.brightness
+
+                    // Configure AVAudioSession to ALLOW haptics and system sounds during recording (iOS 13+)
+                    do {
+                        let audioSession = AVAudioSession.sharedInstance()
+                        try audioSession.setCategory(.playAndRecord, mode: .videoRecording, options: [.mixWithOthers, .defaultToSpeaker])
+                        if #available(iOS 13.0, *) {
+                            try audioSession.setAllowHapticsAndSystemSoundsDuringRecording(true)
+                        }
+                        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                    } catch {
+                        print("NanoApp: Failed to configure AVAudioSession: \(error)")
+                    }
+
                     // Link camera to gallery
                     cameraManager.galleryStore = galleryStore
                     cameraManager.updateMode(settings.captureMode)
-
-                    // Lower brightness to minimum
-                    UIScreen.main.brightness = 0.0
 
                     // Request permissions then start session
                     cameraManager.requestPermissions { granted in
@@ -35,9 +49,15 @@ struct NanoApp: App {
                 .onChange(of: scenePhase) { newPhase in
                     switch newPhase {
                     case .active:
-                        UIScreen.main.brightness = 0.0
                         cameraManager.startSession()
                     case .inactive, .background:
+                        // Restore user's original phone brightness when app is minimized/closed!
+                        UIScreen.main.brightness = originalSystemBrightness
+
+                        // Stop active recording safely if app goes to background
+                        if cameraManager.isRecording {
+                            cameraManager.stopRecording()
+                        }
                         cameraManager.stopSession()
                     @unknown default:
                         break

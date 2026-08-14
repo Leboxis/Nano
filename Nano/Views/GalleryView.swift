@@ -1,13 +1,30 @@
 import SwiftUI
 import AVKit
+import LocalAuthentication
+
+struct ItemFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
 
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
     @EnvironmentObject var settings: AppSettings
 
+    @Binding var selectedTab: Int
     @State private var isSelecting = false
     @State private var selectedIds: Set<UUID> = []
-    @State private var previewItem: MediaItem? = nil
+    @State private var previewIndex: Int? = nil
+    @State private var itemFrames: [UUID: CGRect] = [:]
+    @State private var startRow: Int? = nil
+    @State private var isUnlocked = false
+    @State private var isAuthenticating = false
+
+    init(selectedTab: Binding<Int> = .constant(0)) {
+        self._selectedTab = selectedTab
+    }
 
     @State private var showKDriveUpload = false
     @State private var itemsToUpload: [MediaItem] = []
@@ -23,46 +40,28 @@ struct GalleryView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Header
-                header
-                    .padding(.top, 56)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-
-                if galleryStore.items.isEmpty {
-                    emptyState
-                } else {
-                    // Grid
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 2) {
-                            ForEach(galleryStore.items) { item in
-                                ThumbnailCell(
-                                    item: item,
-                                    isSelecting: isSelecting,
-                                    isSelected: selectedIds.contains(item.id),
-                                    galleryStore: galleryStore
-                                )
-                                .onTapGesture {
-                                    if isSelecting {
-                                        toggleSelection(item.id)
-                                    } else {
-                                        previewItem = item
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Selection toolbar
-                    if isSelecting {
-                        selectionToolbar
-                    }
-                }
+            if isUnlocked {
+                unlockedContent
+            } else {
+                lockedState
             }
         }
-        .fullScreenCover(item: $previewItem) { item in
-            MediaPreviewView(item: item, galleryStore: galleryStore)
+        .fullScreenCover(item: Binding(
+            get: {
+                if let idx = previewIndex, idx >= 0 && idx < galleryStore.items.count {
+                    return galleryStore.items[idx]
+                }
+                return nil
+            },
+            set: { newValue in
+                if newValue == nil {
+                    previewIndex = nil
+                }
+            }
+        )) { _ in
+            if let initialIdx = previewIndex {
+                MediaPreviewPagerView(initialIndex: initialIdx, galleryStore: galleryStore)
+            }
         }
         .sheet(isPresented: $showKDriveUpload) {
             KDriveUploadSheet(itemsToUpload: itemsToUpload)
@@ -74,7 +73,191 @@ struct GalleryView: View {
         } message: {
             Text("Veuillez renseigner votre Token API et ID de Drive dans les Réglages pour utiliser la synchronisation kDrive.")
         }
+        .onAppear {
+            triggerFaceIDAutoPrompt()
+        }
+        .onDisappear {
+            // ALWAYS re-lock Face ID when leaving the Gallery tab
+            isUnlocked = false
+            isAuthenticating = false
+        }
+        .onChange(of: selectedTab) { newTab in
+            if newTab != 0 {
+                // Re-lock when switching to Camera or Settings tab
+                isUnlocked = false
+                isSelecting = false
+                isAuthenticating = false
+                selectedIds.removeAll()
+            } else {
+                triggerFaceIDAutoPrompt()
+            }
+        }
         .statusBarHidden(true)
+    }
+
+    // MARK: - Locked View (Face ID Protection)
+
+    private var lockedState: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 64, weight: .thin))
+                .foregroundColor(Color.white.opacity(0.4))
+
+            VStack(spacing: 8) {
+                Text("Galerie Privée")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+
+                Text("Accès sécurisé par Face ID")
+                    .font(.system(size: 14))
+                    .foregroundColor(Color.white.opacity(0.4))
+            }
+
+            Button(action: {
+                authenticateWithFaceID()
+            }) {
+                HStack(spacing: 10) {
+                    Image(systemName: "faceid")
+                        .font(.system(size: 20))
+                    Text("Déverrouiller avec Face ID")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundColor(.black)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .background(
+                    Capsule()
+                        .fill(Color.white)
+                )
+            }
+            .padding(.top, 12)
+
+            Spacer()
+        }
+    }
+
+    private func triggerFaceIDAutoPrompt() {
+        guard !isUnlocked && !isAuthenticating else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if self.selectedTab == 0 && !self.isUnlocked && !self.isAuthenticating {
+                self.authenticateWithFaceID()
+            }
+        }
+    }
+
+    private func authenticateWithFaceID() {
+        guard !isUnlocked && !isAuthenticating else { return }
+        isAuthenticating = true
+
+        let context = LAContext()
+        var error: NSError?
+
+        let policy: LAPolicy = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+            ? .deviceOwnerAuthenticationWithBiometrics
+            : .deviceOwnerAuthentication
+
+        let reason = "Déverrouiller la galerie privée Nano"
+
+        context.evaluatePolicy(policy, localizedReason: reason) { success, error in
+            DispatchQueue.main.async {
+                self.isAuthenticating = false
+                self.isUnlocked = success
+                if let err = error {
+                    print("GalleryView: Face ID error: \(err.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    // MARK: - Unlocked Content
+
+    private var unlockedContent: some View {
+        VStack(spacing: 0) {
+            // Header
+            header
+                .padding(.top, 56)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+            if galleryStore.items.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 2) {
+                        ForEach(Array(galleryStore.items.enumerated()), id: \.element.id) { index, item in
+                            ThumbnailCell(
+                                item: item,
+                                isSelecting: isSelecting,
+                                isSelected: selectedIds.contains(item.id),
+                                galleryStore: galleryStore
+                            )
+                            .id(item.id)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: ItemFramePreferenceKey.self,
+                                        value: [item.id: geo.frame(in: .named("galleryScrollView"))]
+                                    )
+                                }
+                            )
+                            .onTapGesture {
+                                if isSelecting {
+                                    toggleSelection(item.id)
+                                } else {
+                                    previewIndex = index
+                                }
+                            }
+                        }
+                    }
+                }
+                .coordinateSpace(name: "galleryScrollView")
+                .onPreferenceChange(ItemFramePreferenceKey.self) { frames in
+                    self.itemFrames = frames
+                }
+                .highPriorityGesture(
+                    isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
+                        .onChanged { gesture in
+                            let loc = gesture.location
+
+                            if let matchedIndex = galleryStore.items.firstIndex(where: { itemFrames[$0.id]?.contains(loc) == true }) {
+                                let matchedItem = galleryStore.items[matchedIndex]
+                                let currentRow = matchedIndex / 3
+
+                                if startRow == nil {
+                                    startRow = currentRow
+                                    selectedIds.insert(matchedItem.id)
+                                } else if currentRow != startRow {
+                                    let initialRow = startRow!
+                                    let fromRow = min(initialRow, currentRow)
+                                    let toRow = max(initialRow, currentRow)
+
+                                    for r in fromRow...toRow {
+                                        let firstInRow = r * 3
+                                        let lastInRow = min(firstInRow + 2, galleryStore.items.count - 1)
+                                        if firstInRow <= lastInRow {
+                                            for i in firstInRow...lastInRow {
+                                                selectedIds.insert(galleryStore.items[i].id)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    selectedIds.insert(matchedItem.id)
+                                }
+                            }
+                        }
+                        .onEnded { _ in
+                            startRow = nil
+                        } : nil
+                )
+
+                // Selection toolbar
+                if isSelecting {
+                    selectionToolbar
+                }
+            }
+        }
     }
 
     // MARK: - Header
@@ -110,6 +293,7 @@ struct GalleryView: View {
                         isSelecting.toggle()
                         if !isSelecting {
                             selectedIds.removeAll()
+                            startRow = nil
                         }
                     }
                 }) {
@@ -357,24 +541,41 @@ struct ThumbnailCell: View {
     }
 }
 
-// MARK: - Media Preview
+// MARK: - Full Screen Media Pager (Swipe Left/Right between Gallery Items)
 
-struct MediaPreviewView: View {
-    let item: MediaItem
-    let galleryStore: GalleryStore
+struct MediaPreviewPagerView: View {
+    let initialIndex: Int
+    @ObservedObject var galleryStore: GalleryStore
     @Environment(\.dismiss) private var dismiss
+
+    @State private var currentIndex: Int = 0
+
+    init(initialIndex: Int, galleryStore: GalleryStore) {
+        self.initialIndex = initialIndex
+        self.galleryStore = galleryStore
+        self._currentIndex = State(initialValue: initialIndex)
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if item.type == .photo {
-                photoPreview
-            } else {
-                videoPreview
+            if !galleryStore.items.isEmpty {
+                TabView(selection: $currentIndex) {
+                    ForEach(Array(galleryStore.items.enumerated()), id: \.offset) { index, item in
+                        SingleMediaPreviewView(
+                            item: item,
+                            isCurrent: index == currentIndex,
+                            galleryStore: galleryStore
+                        )
+                        .tag(index)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea()
             }
 
-            // Top bar
+            // Top Bar
             VStack {
                 HStack {
                     Button(action: { dismiss() }) {
@@ -382,23 +583,26 @@ struct MediaPreviewView: View {
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white)
                             .padding(12)
-                            .background(
-                                Circle()
-                                    .fill(Color.white.opacity(0.15))
-                            )
+                            .background(Circle().fill(Color.white.opacity(0.15)))
                     }
 
                     Spacer()
 
-                    Button(action: shareItem) {
+                    // Media counter: e.g. "3 / 12"
+                    if currentIndex < galleryStore.items.count {
+                        Text("\(currentIndex + 1) / \(galleryStore.items.count)")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color.white.opacity(0.7))
+                    }
+
+                    Spacer()
+
+                    Button(action: shareCurrentItem) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white)
                             .padding(12)
-                            .background(
-                                Circle()
-                                    .fill(Color.white.opacity(0.15))
-                            )
+                            .background(Circle().fill(Color.white.opacity(0.15)))
                     }
                 }
                 .padding(.horizontal, 20)
@@ -410,22 +614,9 @@ struct MediaPreviewView: View {
         .statusBarHidden(true)
     }
 
-    @ViewBuilder
-    private var photoPreview: some View {
-        let url = galleryStore.getFullPath(for: item)
-        if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
-            ZoomableImageView(image: image)
-        }
-    }
-
-    @ViewBuilder
-    private var videoPreview: some View {
-        let url = galleryStore.getFullPath(for: item)
-        VideoPlayer(player: AVPlayer(url: url))
-            .ignoresSafeArea()
-    }
-
-    private func shareItem() {
+    private func shareCurrentItem() {
+        guard currentIndex >= 0 && currentIndex < galleryStore.items.count else { return }
+        let item = galleryStore.items[currentIndex]
         let url = galleryStore.getFullPath(for: item)
 
         let activityVC = UIActivityViewController(
@@ -441,6 +632,233 @@ struct MediaPreviewView: View {
             }
             topVC.present(activityVC, animated: true)
         }
+    }
+}
+
+// MARK: - Single Media Item Preview (with Interactive Video Timeline Scrubber)
+
+struct SingleMediaPreviewView: View {
+    let item: MediaItem
+    let isCurrent: Bool
+    let galleryStore: GalleryStore
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if item.type == .photo {
+                photoPreview
+            } else {
+                let url = galleryStore.getFullPath(for: item)
+                InteractiveVideoPlayerView(url: url, isCurrent: isCurrent)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var photoPreview: some View {
+        let url = galleryStore.getFullPath(for: item)
+        if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
+            ZoomableImageView(image: image)
+        }
+    }
+}
+
+// MARK: - Interactive Video Player with Timeline Scrubber Bar
+
+struct InteractiveVideoPlayerView: View {
+    let url: URL
+    let isCurrent: Bool
+
+    @State private var player: AVPlayer? = nil
+    @State private var isPlaying = false
+    @State private var currentTime: Double = 0
+    @State private var duration: Double = 1
+    @State private var isEditingSlider = false
+    @State private var timeObserverToken: Any? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if let player = player {
+                CustomAVPlayerWrapper(player: player)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        togglePlayPause()
+                    }
+
+                // Play / Pause center indicator overlay
+                if !isPlaying {
+                    Button(action: togglePlayPause) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 32))
+                            .foregroundColor(.white)
+                            .padding(20)
+                            .background(Circle().fill(Color.black.opacity(0.6)))
+                    }
+                }
+
+                // Bottom Timeline Scrubber Control Bar
+                VStack {
+                    Spacer()
+
+                    VStack(spacing: 8) {
+                        // Slider Scrubber to seek forward / backward
+                        Slider(
+                            value: Binding(
+                                get: { currentTime },
+                                set: { newValue in
+                                    currentTime = newValue
+                                    seekToTime(newValue)
+                                }
+                            ),
+                            in: 0...max(1, duration),
+                            onEditingChanged: { editing in
+                                isEditingSlider = editing
+                            }
+                        )
+                        .accentColor(.white)
+
+                        // Time Labels
+                        HStack {
+                            Text(formatTime(currentTime))
+                                .font(.system(size: 12, weight: .regular))
+                                .monospacedDigit()
+                                .foregroundColor(Color.white.opacity(0.8))
+
+                            Spacer()
+
+                            Text(formatTime(duration))
+                                .font(.system(size: 12, weight: .regular))
+                                .monospacedDigit()
+                                .foregroundColor(Color.white.opacity(0.8))
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 16)
+                    .padding(.bottom, 24)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.85), Color.black.opacity(0.0)],
+                            startPoint: .bottom,
+                            endPoint: .top
+                        )
+                    )
+                }
+            }
+        }
+        .onAppear {
+            setupPlayer()
+        }
+        .onDisappear {
+            cleanupPlayer()
+        }
+        .onChange(of: isCurrent) { active in
+            if active {
+                player?.play()
+                isPlaying = true
+            } else {
+                player?.pause()
+                isPlaying = false
+            }
+        }
+    }
+
+    private func setupPlayer() {
+        let avPlayer = AVPlayer(url: url)
+        self.player = avPlayer
+
+        // Track duration
+        if let currentItem = avPlayer.currentItem {
+            let asset = currentItem.asset
+            Task {
+                if let dur = try? await asset.load(.duration) {
+                    let seconds = CMTimeGetSeconds(dur)
+                    if !seconds.isNaN && seconds > 0 {
+                        await MainActor.run {
+                            self.duration = seconds
+                        }
+                    }
+                }
+            }
+        }
+
+        // Periodic time observer
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        timeObserverToken = avPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak avPlayer] time in
+            guard avPlayer != nil else { return }
+            if !isEditingSlider {
+                let seconds = CMTimeGetSeconds(time)
+                if !seconds.isNaN {
+                    self.currentTime = seconds
+                }
+            }
+        }
+
+        if isCurrent {
+            avPlayer.play()
+            isPlaying = true
+        }
+    }
+
+    private func togglePlayPause() {
+        guard let player = player else { return }
+        if isPlaying {
+            player.pause()
+            isPlaying = false
+        } else {
+            player.play()
+            isPlaying = true
+        }
+    }
+
+    private func seekToTime(_ seconds: Double) {
+        guard let player = player else { return }
+        let targetTime = CMTime(seconds: seconds, preferredTimescale: 600)
+        player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func cleanupPlayer() {
+        if let token = timeObserverToken, let player = player {
+            player.removeTimeObserver(token)
+        }
+        timeObserverToken = nil
+        player?.pause()
+        player = nil
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        guard !seconds.isNaN && seconds >= 0 else { return "00:00" }
+        let totalSeconds = Int(seconds)
+        let mins = totalSeconds / 60
+        let secs = totalSeconds % 60
+        return String(format: "%02d:%02d", mins, secs)
+    }
+}
+
+struct CustomAVPlayerWrapper: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> AVPlayerViewContainer {
+        let container = AVPlayerViewContainer()
+        container.playerLayer.player = player
+        container.playerLayer.videoGravity = .resizeAspect
+        return container
+    }
+
+    func updateUIView(_ uiView: AVPlayerViewContainer, context: Context) {
+        uiView.playerLayer.player = player
+    }
+}
+
+class AVPlayerViewContainer: UIView {
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
     }
 }
 
