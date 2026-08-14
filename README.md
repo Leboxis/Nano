@@ -8,7 +8,8 @@ Ultra-minimal stealth camera app for iOS.
 - **Tap** — Take a photo (photo mode) or start/stop recording (video mode)
 - **Long press** — Burst photo capture
 - **Swipe left** — Private gallery with multi-selection & export
-- **Swipe right** — Settings (megapixels, video quality, capture mode)
+- **Infomaniak kDrive Sync** — One-tap batch upload of the entire gallery or selected items to your Infomaniak kDrive
+- **Swipe right** — Settings (megapixels, video quality, capture mode, kDrive configuration & test)
 - **Auto-dim** — Screen brightness set to minimum on launch
 - **Haptic feedback** — Vibration on video stop, light tap on photo capture
 - **Private storage** — All media stored within the app sandbox (invisible to Photos.app)
@@ -35,6 +36,7 @@ open Nano.xcodeproj
 - SwiftUI + AVFoundation
 - iOS 16+
 - iPhone only (portrait)
+- Infomaniak kDrive REST API v3
 - No external dependencies
 - XcodeGen for project generation
 
@@ -44,24 +46,26 @@ open Nano.xcodeproj
 Nano/
 ├── Nano/
 │   ├── App/
-│   │   ├── NanoApp.swift        # Entry point, brightness control
-│   │   └── ContentView.swift    # Page navigation (3 swipeable pages)
+│   │   ├── NanoApp.swift          # Entry point, brightness control
+│   │   └── ContentView.swift      # Page navigation (3 swipeable pages)
 │   ├── Views/
-│   │   ├── CameraView.swift     # Black screen + tap/long press gestures
-│   │   ├── SettingsView.swift   # Mode, MP, video quality settings
-│   │   └── GalleryView.swift    # Private gallery with selection & export
+│   │   ├── CameraView.swift       # Black screen + tap/long press gestures
+│   │   ├── SettingsView.swift     # Mode, MP, video quality & kDrive settings
+│   │   ├── GalleryView.swift      # Private gallery with selection, export & kDrive upload
+│   │   └── KDriveUploadSheet.swift # kDrive upload progress modal
 │   ├── Camera/
-│   │   └── CameraManager.swift  # AVFoundation session management
+│   │   └── CameraManager.swift    # AVFoundation session management
 │   ├── Models/
-│   │   ├── MediaItem.swift      # Photo/video data model
-│   │   └── AppSettings.swift    # UserDefaults persistence
+│   │   ├── MediaItem.swift        # Photo/video data model
+│   │   └── AppSettings.swift      # UserDefaults persistence (including kDrive credentials)
 │   ├── Services/
-│   │   └── GalleryStore.swift   # File storage & thumbnail generation
+│   │   ├── GalleryStore.swift     # File storage & thumbnail generation
+│   │   └── KDriveService.swift    # Infomaniak kDrive API v3 client & batch uploader
 │   ├── Assets.xcassets/
 │   └── Info.plist
-├── project.yml                  # XcodeGen spec
+├── project.yml                    # XcodeGen spec
 └── .github/workflows/
-    └── build-ipa.yml            # CI/CD → unsigned IPA
+    └── build-ipa.yml              # CI/CD → unsigned IPA
 ```
 
 ## License

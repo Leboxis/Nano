@@ -7,8 +7,17 @@ struct SettingsView: View {
     @AppStorage("photoMegapixels") private var photoMegapixels: Int = 12
     @AppStorage("videoQuality") private var videoQuality: String = "1080p"
 
+    @State private var isTestingConnection = false
+    @State private var connectionStatus: ConnectionStatus? = nil
+    @State private var showToken = false
+
     private let megapixelOptions = [8, 12, 24, 48]
     private let videoQualityOptions = ["480p", "720p", "1080p", "4K"]
+
+    enum ConnectionStatus {
+        case success(String)
+        case error(String)
+    }
 
     var body: some View {
         ZStack {
@@ -104,6 +113,116 @@ struct SettingsView: View {
                         }
                     }
 
+                    // Infomaniak kDrive Section
+                    settingsSection(title: "Infomaniak kDrive") {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // API Token
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Token API")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(Color.white.opacity(0.6))
+                                    Spacer()
+                                    Button(action: { showToken.toggle() }) {
+                                        Image(systemName: showToken ? "eye.slash" : "eye")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(Color.white.opacity(0.4))
+                                    }
+                                    Button(action: pasteToken) {
+                                        Text("Coller")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.white)
+                                    }
+                                    .padding(.leading, 8)
+                                }
+
+                                if showToken {
+                                    TextField("Bearer token...", text: $settings.kDriveApiToken)
+                                        .textFieldStyle(CustomDarkTextFieldStyle())
+                                        .autocapitalization(.none)
+                                        .disableAutocorrection(true)
+                                } else {
+                                    SecureField("Bearer token...", text: $settings.kDriveApiToken)
+                                        .textFieldStyle(CustomDarkTextFieldStyle())
+                                        .autocapitalization(.none)
+                                        .disableAutocorrection(true)
+                                }
+                            }
+
+                            // Drive ID
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("ID du Drive (kDrive ID)")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(Color.white.opacity(0.6))
+
+                                TextField("Ex: 123456", text: $settings.kDriveId)
+                                    .textFieldStyle(CustomDarkTextFieldStyle())
+                                    .keyboardType(.numberPad)
+                            }
+
+                            // Directory ID
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("ID du dossier cible")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(Color.white.opacity(0.6))
+                                    Spacer()
+                                    Text("1 = Racine")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(Color.white.opacity(0.35))
+                                }
+
+                                TextField("1", text: $settings.kDriveDirectoryId)
+                                    .textFieldStyle(CustomDarkTextFieldStyle())
+                                    .keyboardType(.numberPad)
+                            }
+
+                            // Test Connection Button
+                            Button(action: testConnection) {
+                                HStack(spacing: 8) {
+                                    if isTestingConnection {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: "network")
+                                            .font(.system(size: 14))
+                                    }
+                                    Text("Tester la connexion")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.white.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .disabled(isTestingConnection || !settings.isKDriveConfigured)
+                            .opacity(settings.isKDriveConfigured ? 1.0 : 0.4)
+
+                            // Status Banner
+                            if let status = connectionStatus {
+                                HStack(spacing: 8) {
+                                    switch status {
+                                    case .success(let driveName):
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.green)
+                                        Text("Connecté : \(driveName)")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundColor(.green)
+                                    case .error(let message):
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundColor(.red)
+                                        Text(message)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.red)
+                                    }
+                                }
+                                .padding(.top, 4)
+                            }
+                        }
+                    }
+
                     // App Info
                     settingsSection(title: "À propos") {
                         VStack(alignment: .leading, spacing: 8) {
@@ -118,6 +237,36 @@ struct SettingsView: View {
             }
         }
         .statusBarHidden(true)
+    }
+
+    // MARK: - Actions
+    private func pasteToken() {
+        if let clip = UIPasteboard.general.string {
+            settings.kDriveApiToken = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func testConnection() {
+        isTestingConnection = true
+        connectionStatus = nil
+
+        Task {
+            do {
+                let name = try await KDriveService.shared.testConnection(
+                    token: settings.kDriveApiToken,
+                    driveId: settings.kDriveId
+                )
+                await MainActor.run {
+                    self.connectionStatus = .success(name)
+                    self.isTestingConnection = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.connectionStatus = .error(error.localizedDescription)
+                    self.isTestingConnection = false
+                }
+            }
+        }
     }
 
     // MARK: - Components
@@ -149,5 +298,18 @@ struct SettingsView: View {
                 .font(.system(size: 14, weight: .medium, design: .monospaced))
                 .foregroundColor(Color.white.opacity(0.4))
         }
+    }
+}
+
+// Custom Dark Text Field Style
+struct CustomDarkTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(0.06))
+            .foregroundColor(.white)
+            .font(.system(size: 14, design: .monospaced))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

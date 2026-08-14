@@ -3,10 +3,15 @@ import AVKit
 
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
+    @EnvironmentObject var settings: AppSettings
 
     @State private var isSelecting = false
     @State private var selectedIds: Set<UUID> = []
     @State private var previewItem: MediaItem? = nil
+
+    @State private var showKDriveUpload = false
+    @State private var itemsToUpload: [MediaItem] = []
+    @State private var showNotConfiguredAlert = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -59,13 +64,23 @@ struct GalleryView: View {
         .fullScreenCover(item: $previewItem) { item in
             MediaPreviewView(item: item, galleryStore: galleryStore)
         }
+        .sheet(isPresented: $showKDriveUpload) {
+            KDriveUploadSheet(itemsToUpload: itemsToUpload)
+                .environmentObject(galleryStore)
+                .environmentObject(settings)
+        }
+        .alert("kDrive non configuré", isPresented: $showNotConfiguredAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Veuillez renseigner votre Token API et ID de Drive dans les Réglages pour utiliser la synchronisation kDrive.")
+        }
         .statusBarHidden(true)
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 16) {
             Text("Galerie")
                 .font(.system(size: 32, weight: .bold))
                 .foregroundColor(.white)
@@ -73,6 +88,23 @@ struct GalleryView: View {
             Spacer()
 
             if !galleryStore.items.isEmpty {
+                if !isSelecting {
+                    // Upload All to kDrive Button
+                    Button(action: uploadAllToKDrive) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "icloud.and.arrow.up.fill")
+                                .font(.system(size: 14))
+                            Text("kDrive")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(Capsule())
+                    }
+                }
+
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isSelecting.toggle()
@@ -114,7 +146,7 @@ struct GalleryView: View {
             Divider()
                 .background(Color.white.opacity(0.1))
 
-            HStack(spacing: 20) {
+            HStack(spacing: 16) {
                 // Select All
                 Button(action: selectAll) {
                     VStack(spacing: 4) {
@@ -136,12 +168,24 @@ struct GalleryView: View {
 
                 Spacer()
 
+                // Upload selected to kDrive
+                Button(action: uploadSelectedToKDrive) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "icloud.and.arrow.up.fill")
+                            .font(.system(size: 20))
+                        Text("kDrive")
+                            .font(.system(size: 10))
+                    }
+                    .foregroundColor(selectedIds.isEmpty ? Color.white.opacity(0.3) : .white)
+                }
+                .disabled(selectedIds.isEmpty)
+
                 // Export
                 Button(action: exportSelected) {
                     VStack(spacing: 4) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 20))
-                        Text("Exporter")
+                        Text("Partager")
                             .font(.system(size: 10))
                     }
                     .foregroundColor(selectedIds.isEmpty ? Color.white.opacity(0.3) : .white)
@@ -160,13 +204,31 @@ struct GalleryView: View {
                 }
                 .disabled(selectedIds.isEmpty)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 20)
             .padding(.vertical, 12)
             .background(Color(red: 0.1, green: 0.1, blue: 0.1))
         }
     }
 
     // MARK: - Actions
+
+    private func uploadAllToKDrive() {
+        guard settings.isKDriveConfigured else {
+            showNotConfiguredAlert = true
+            return
+        }
+        itemsToUpload = galleryStore.items
+        showKDriveUpload = true
+    }
+
+    private func uploadSelectedToKDrive() {
+        guard settings.isKDriveConfigured else {
+            showNotConfiguredAlert = true
+            return
+        }
+        itemsToUpload = galleryStore.items.filter { selectedIds.contains($0.id) }
+        showKDriveUpload = true
+    }
 
     private func toggleSelection(_ id: UUID) {
         if selectedIds.contains(id) {

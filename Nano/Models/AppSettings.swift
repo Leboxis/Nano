@@ -18,6 +18,17 @@ class AppSettings: ObservableObject {
     @AppStorage("photoMegapixels") var photoMegapixels: Int = 12
     @AppStorage("videoQuality") var videoQuality: String = "1080p"
 
+    // MARK: - Infomaniak kDrive Settings
+    @AppStorage("kDriveApiToken") var kDriveApiToken: String = ""
+    @AppStorage("kDriveId") var kDriveId: String = ""
+    @AppStorage("kDriveDirectoryId") var kDriveDirectoryId: String = "1"
+    @AppStorage("kDriveFolderName") var kDriveFolderName: String = "Nano"
+
+    var isKDriveConfigured: Bool {
+        !kDriveApiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !kDriveId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var captureMode: CaptureMode {
         get { CaptureMode(rawValue: lastMode) ?? .photo }
         set {
