@@ -30,6 +30,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            cameraManager.galleryStore = galleryStore
             // Start on camera = 0% brightness
             UIScreen.main.brightness = 0.0
         }

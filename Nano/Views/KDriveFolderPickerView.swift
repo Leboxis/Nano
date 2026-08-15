@@ -9,6 +9,10 @@ struct KDriveFolderPickerView: View {
     @EnvironmentObject var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
 
+    var initialDirectoryId: String? = nil
+    var initialDirectoryName: String? = nil
+    var onSelect: ((_ id: String, _ name: String) -> Void)? = nil
+
     @State private var pathStack: [FolderPathNode] = [FolderPathNode(id: "1", name: "Racine")]
     @State private var folders: [KDriveFolderItem] = []
     @State private var isLoading = false
@@ -31,9 +35,14 @@ struct KDriveFolderPickerView: View {
             VStack(spacing: 0) {
                 // Header
                 HStack {
-                    Text("Dossier de destination")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Choisir un dossier")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                        Text("Sélectionnez le dossier de destination kDrive")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color.white.opacity(0.5))
+                    }
 
                     Spacer()
 
@@ -62,7 +71,10 @@ struct KDriveFolderPickerView: View {
                             }) {
                                 HStack(spacing: 4) {
                                     if index == 0 {
-                                        Image(systemName: "externaldrive")
+                                        Image(systemName: "externaldrive.fill")
+                                            .font(.system(size: 11))
+                                    } else {
+                                        Image(systemName: "folder.fill")
                                             .font(.system(size: 11))
                                     }
                                     Text(node.name)
@@ -146,8 +158,13 @@ struct KDriveFolderPickerView: View {
                                         Text("Aucun sous-dossier ici")
                                             .font(.system(size: 13))
                                             .foregroundColor(Color.white.opacity(0.3))
+                                        Text("Vous pouvez créer un nouveau dossier ci-dessous ou sélectionner ce dossier.")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(Color.white.opacity(0.2))
+                                            .multilineTextAlignment(.center)
                                     }
                                     .padding(.vertical, 24)
+                                    .padding(.horizontal, 20)
                                     Spacer()
                                 }
                                 .listRowBackground(Color.clear)
@@ -249,11 +266,16 @@ struct KDriveFolderPickerView: View {
     // MARK: - Navigation Helpers
 
     private func initializePath() {
-        if settings.kDriveDirectoryId != "1" && !settings.kDriveDirectoryName.isEmpty {
+        let dirId = initialDirectoryId ?? settings.kDriveDirectoryId
+        let dirName = initialDirectoryName ?? settings.kDriveDirectoryName
+
+        if dirId != "1" && !dirName.isEmpty && dirName != "Racine (kDrive)" {
             pathStack = [
                 FolderPathNode(id: "1", name: "Racine"),
-                FolderPathNode(id: settings.kDriveDirectoryId, name: settings.kDriveDirectoryName)
+                FolderPathNode(id: dirId, name: dirName)
             ]
+        } else {
+            pathStack = [FolderPathNode(id: "1", name: "Racine")]
         }
     }
 
@@ -276,8 +298,15 @@ struct KDriveFolderPickerView: View {
     }
 
     private func selectCurrentFolder() {
-        settings.kDriveDirectoryId = currentFolder.id
-        settings.kDriveDirectoryName = currentFolder.name
+        let selectedId = currentFolder.id
+        let selectedName = currentFolder.name == "Racine" ? "Racine (kDrive)" : currentFolder.name
+
+        if let onSelect = onSelect {
+            onSelect(selectedId, selectedName)
+        } else {
+            settings.kDriveDirectoryId = selectedId
+            settings.kDriveDirectoryName = selectedName
+        }
         dismiss()
     }
 

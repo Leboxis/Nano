@@ -74,6 +74,7 @@ struct GalleryView: View {
             Text("Veuillez renseigner votre Token API et ID de Drive dans les Réglages pour utiliser la synchronisation kDrive.")
         }
         .onAppear {
+            galleryStore.syncWithDisk()
             triggerFaceIDAutoPrompt()
         }
         .onDisappear {
@@ -89,6 +90,7 @@ struct GalleryView: View {
                 isAuthenticating = false
                 selectedIds.removeAll()
             } else {
+                galleryStore.syncWithDisk()
                 triggerFaceIDAutoPrompt()
             }
         }
@@ -479,9 +481,15 @@ struct ThumbnailCell: View {
                         .frame(width: geo.size.width, height: geo.size.width)
                         .clipped()
                 } else {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.05))
-                        .frame(width: geo.size.width, height: geo.size.width)
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(width: geo.size.width, height: geo.size.width)
+
+                        Image(systemName: item.type == .video ? "video.fill" : "photo.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(Color.white.opacity(0.2))
+                    }
                 }
             }
             .aspectRatio(1, contentMode: .fit)
@@ -527,6 +535,9 @@ struct ThumbnailCell: View {
             }
         }
         .onAppear {
+            loadThumbnail()
+        }
+        .onChange(of: item.id) { _ in
             loadThumbnail()
         }
     }

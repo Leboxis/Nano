@@ -19,7 +19,7 @@ class CameraManager: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.nano.camera.session")
     private let defaults = UserDefaults.standard
 
-    weak var galleryStore: GalleryStore?
+    var galleryStore: GalleryStore?
 
     // Burst
     private var isBursting = false
@@ -486,48 +486,43 @@ class CameraManager: NSObject, ObservableObject {
 
             // Safe bound checking on iOS 16+ to guarantee settings.maxPhotoDimensions <= photoOutput.maxPhotoDimensions
             if #available(iOS 16.0, *), let camera = self.currentCamera, let photoOutput = self.photoOutput {
-                // Ensure output ceiling is initialized to active format's max
-                if let maxDim = camera.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
-                    if photoOutput.maxPhotoDimensions.width < maxDim.width {
-                        photoOutput.maxPhotoDimensions = maxDim
-                    }
-                }
-
                 let outputMaxDims = photoOutput.maxPhotoDimensions
-                let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
-                let targetMP = self.photoMegapixels
+                if outputMaxDims.width > 0 && outputMaxDims.height > 0 {
+                    let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
+                    let targetMP = self.photoMegapixels
 
-                let desiredWidth: Int32
-                switch targetMP {
-                case 8: desiredWidth = 3264
-                case 12: desiredWidth = 4032
-                case 24: desiredWidth = 5712
-                case 48: desiredWidth = 8064
-                default: desiredWidth = 5712
-                }
-
-                // Filter candidates that do NOT exceed photoOutput's ceiling
-                let validCandidates = supportedDims.filter {
-                    $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
-                }
-
-                var chosenDims = outputMaxDims
-                if !validCandidates.isEmpty {
-                    var match = validCandidates.last!
-                    for dims in validCandidates {
-                        if dims.width <= desiredWidth {
-                            match = dims
-                        }
-                        if dims.width == desiredWidth {
-                            match = dims
-                            break
-                        }
+                    let desiredWidth: Int32
+                    switch targetMP {
+                    case 8: desiredWidth = 3264
+                    case 12: desiredWidth = 4032
+                    case 24: desiredWidth = 5712
+                    case 48: desiredWidth = 8064
+                    default: desiredWidth = 5712
                     }
-                    chosenDims = match
-                }
 
-                settings.maxPhotoDimensions = chosenDims
-                print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting (ceiling: \(outputMaxDims.width)x\(outputMaxDims.height))")
+                    // Filter candidates that do NOT exceed photoOutput's ceiling
+                    let validCandidates = supportedDims.filter {
+                        $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
+                    }
+
+                    var chosenDims = outputMaxDims
+                    if !validCandidates.isEmpty {
+                        var match = validCandidates.last!
+                        for dims in validCandidates {
+                            if dims.width <= desiredWidth {
+                                match = dims
+                            }
+                            if dims.width == desiredWidth {
+                                match = dims
+                                break
+                            }
+                        }
+                        chosenDims = match
+                    }
+
+                    settings.maxPhotoDimensions = chosenDims
+                    print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting (ceiling: \(outputMaxDims.width)x\(outputMaxDims.height))")
+                }
             }
 
             // Configure native AVFoundation photo mirroring for front camera
@@ -638,13 +633,16 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         if let error = error {
-            print("CameraManager: Photo capture error: \(error)")
+            print("CameraManager: Photo capture error: \(error.localizedDescription)")
             return
         }
 
         // Save native Apple photo representation directly
         if let data = photo.fileDataRepresentation() {
+            print("CameraManager: Processing captured photo data (\(data.count) bytes)")
             galleryStore?.savePhoto(data: data)
+        } else {
+            print("CameraManager: Unable to extract fileDataRepresentation from AVCapturePhoto")
         }
 
         // If native burst is active, trigger next frame immediately

@@ -28,27 +28,93 @@ class GalleryStore: ObservableObject {
         try? fileManager.createDirectory(at: thumbnailsURL, withIntermediateDirectories: true)
     }
 
-    // MARK: - Index Persistence
+    // MARK: - Index Persistence & Sync
 
     private func loadIndex() {
-        guard fileManager.fileExists(atPath: indexURL.path) else { return }
-        do {
-            let data = try Data(contentsOf: indexURL)
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let loaded = try decoder.decode([MediaItem].self, from: data)
+        createDirectoriesIfNeeded()
+        syncWithDisk()
+    }
 
-            // Filter out items whose physical file no longer exists
-            let validItems = loaded.filter { item in
-                let path = galleryURL.appendingPathComponent(item.filename).path
-                return fileManager.fileExists(atPath: path)
+    func syncWithDisk() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+
+            self.createDirectoriesIfNeeded()
+
+            var diskItems: [MediaItem] = []
+            var knownIds = Set<UUID>()
+
+            // 1. Try reading existing index.json
+            if self.fileManager.fileExists(atPath: self.indexURL.path) {
+                if let data = try? Data(contentsOf: self.indexURL) {
+                    let decoder = JSONDecoder()
+                    decoder.dateDecodingStrategy = .iso8601
+                    if let loaded = try? decoder.decode([MediaItem].self, from: data) {
+                        for item in loaded {
+                            let path = self.galleryURL.appendingPathComponent(item.filename).path
+                            if self.fileManager.fileExists(atPath: path) {
+                                diskItems.append(item)
+                                knownIds.insert(item.id)
+                            }
+                        }
+                    }
+                }
             }
+
+            // 2. Scan physical directory to discover any unindexed files
+            if let fileURLs = try? self.fileManager.contentsOfDirectory(
+                at: self.galleryURL,
+                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for url in fileURLs {
+                    let filename = url.lastPathComponent
+                    if filename == "thumbnails" || filename == "index.json" { continue }
+
+                    let ext = url.pathExtension.lowercased()
+                    guard ext == "heic" || ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "mov" || ext == "mp4" else {
+                        continue
+                    }
+
+                    let nameWithoutExt = url.deletingPathExtension().lastPathComponent
+                    let parsedUUID = UUID(uuidString: nameWithoutExt) ?? UUID()
+
+                    if !knownIds.contains(parsedUUID) {
+                        let isVideo = (ext == "mov" || ext == "mp4")
+                        let attr = (try? self.fileManager.attributesOfItem(atPath: url.path)) ?? [:]
+                        let size = attr[.size] as? Int64 ?? 0
+                        let date = (attr[.creationDate] as? Date) ?? (attr[.modificationDate] as? Date) ?? Date()
+
+                        let newItem = MediaItem(
+                            id: parsedUUID,
+                            filename: filename,
+                            type: isVideo ? .video : .photo,
+                            createdAt: date,
+                            fileSize: size
+                        )
+
+                        diskItems.append(newItem)
+                        knownIds.insert(parsedUUID)
+
+                        // Generate missing thumbnail
+                        if !isVideo {
+                            if let imgData = try? Data(contentsOf: url), let img = UIImage(data: imgData) {
+                                self.generateThumbnail(image: img, for: parsedUUID)
+                            }
+                        } else {
+                            self.generateVideoThumbnail(url: url, for: parsedUUID)
+                        }
+                    }
+                }
+            }
+
+            // Sort by newest first
+            diskItems.sort { $0.createdAt > $1.createdAt }
 
             DispatchQueue.main.async {
-                self.items = validItems.sorted { $0.createdAt > $1.createdAt }
+                self.items = diskItems
+                self.saveIndex()
             }
-        } catch {
-            print("GalleryStore: Failed to load index: \(error)")
         }
     }
 
@@ -70,6 +136,8 @@ class GalleryStore: ObservableObject {
         queue.async { [weak self] in
             guard let self = self else { return }
 
+            self.createDirectoriesIfNeeded()
+
             let id = UUID()
             let filename = "\(id.uuidString).heic"
             let fileURL = self.galleryURL.appendingPathComponent(filename)
@@ -77,13 +145,13 @@ class GalleryStore: ObservableObject {
             do {
                 try data.write(to: fileURL, options: .atomic)
 
-                // Generate thumbnail
+                // Generate thumbnail immediately
                 if let image = UIImage(data: data) {
                     self.generateThumbnail(image: image, for: id)
                 }
 
-                let attributes = try self.fileManager.attributesOfItem(atPath: fileURL.path)
-                let fileSize = attributes[.size] as? Int64 ?? 0
+                let attributes = (try? self.fileManager.attributesOfItem(atPath: fileURL.path)) ?? [:]
+                let fileSize = attributes[.size] as? Int64 ?? Int64(data.count)
 
                 let item = MediaItem(
                     id: id,
@@ -96,6 +164,7 @@ class GalleryStore: ObservableObject {
                 DispatchQueue.main.async {
                     self.items.insert(item, at: 0)
                     self.saveIndex()
+                    print("GalleryStore: Photo successfully added to gallery (\(filename), \(fileSize) bytes). Total items: \(self.items.count)")
                 }
             } catch {
                 print("GalleryStore: Failed to save photo: \(error)")
@@ -109,6 +178,8 @@ class GalleryStore: ObservableObject {
         queue.async { [weak self] in
             guard let self = self else { return }
 
+            self.createDirectoriesIfNeeded()
+
             let id = UUID()
             let filename = "\(id.uuidString).mov"
             let destURL = self.galleryURL.appendingPathComponent(filename)
@@ -119,12 +190,12 @@ class GalleryStore: ObservableObject {
                 }
                 try self.fileManager.copyItem(at: url, to: destURL)
 
-                // Generate video thumbnail asynchronously after brief delay for file flush
+                // Generate video thumbnail asynchronously
                 DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.3) {
                     self.generateVideoThumbnail(url: destURL, for: id)
                 }
 
-                let attributes = try self.fileManager.attributesOfItem(atPath: destURL.path)
+                let attributes = (try? self.fileManager.attributesOfItem(atPath: destURL.path)) ?? [:]
                 let fileSize = attributes[.size] as? Int64 ?? 0
 
                 let item = MediaItem(
@@ -138,6 +209,7 @@ class GalleryStore: ObservableObject {
                 DispatchQueue.main.async {
                     self.items.insert(item, at: 0)
                     self.saveIndex()
+                    print("GalleryStore: Video successfully added to gallery (\(filename)). Total items: \(self.items.count)")
                 }
 
                 // Clean up temp file
@@ -154,8 +226,8 @@ class GalleryStore: ObservableObject {
         let thumbSize = CGSize(width: 300, height: 300)
         let renderer = UIGraphicsImageRenderer(size: thumbSize)
         let thumb = renderer.image { _ in
-            let aspectWidth = thumbSize.width / image.size.width
-            let aspectHeight = thumbSize.height / image.size.height
+            let aspectWidth = thumbSize.width / max(1, image.size.width)
+            let aspectHeight = thumbSize.height / max(1, image.size.height)
             let aspectRatio = max(aspectWidth, aspectHeight)
             let scaledSize = CGSize(
                 width: image.size.width * aspectRatio,
@@ -191,12 +263,29 @@ class GalleryStore: ObservableObject {
         }
     }
 
-    // MARK: - Load Thumbnail
+    // MARK: - Load Thumbnail with Fallback
 
     func loadThumbnail(for item: MediaItem) -> UIImage? {
         let thumbURL = thumbnailsURL.appendingPathComponent(item.thumbnailFilename)
-        guard let data = try? Data(contentsOf: thumbURL) else { return nil }
-        return UIImage(data: data)
+        if let data = try? Data(contentsOf: thumbURL), let img = UIImage(data: data) {
+            return img
+        }
+
+        // Fallback: If thumbnail doesn't exist yet, load from full file and generate thumb
+        let fullURL = getFullPath(for: item)
+        if item.type == .photo {
+            if let data = try? Data(contentsOf: fullURL), let img = UIImage(data: data) {
+                queue.async {
+                    self.generateThumbnail(image: img, for: item.id)
+                }
+                return img
+            }
+        } else if item.type == .video {
+            queue.async {
+                self.generateVideoThumbnail(url: fullURL, for: item.id)
+            }
+        }
+        return nil
     }
 
     // MARK: - Full Path

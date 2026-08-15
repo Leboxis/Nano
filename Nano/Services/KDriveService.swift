@@ -126,7 +126,7 @@ class KDriveService: ObservableObject {
             throw KDriveError.invalidConfiguration
         }
 
-        guard let url = URL(string: "https://api.infomaniak.com/3/drive/\(cleanDriveId)/files/\(cleanDirId)/files?type[]=dir&limit=200") else {
+        guard let url = URL(string: "https://api.infomaniak.com/3/drive/\(cleanDriveId)/files/\(cleanDirId)/files?limit=500") else {
             throw KDriveError.invalidURL
         }
 
@@ -251,7 +251,7 @@ class KDriveService: ObservableObject {
         if httpResponse.statusCode == 401 {
             throw KDriveError.authenticationFailed
         } else if httpResponse.statusCode == 404 {
-            throw KDriveError.uploadFailed("Dossier ou Drive introuvable (code 404)")
+            throw KDriveError.uploadFailed("Dossier (ID: \(cleanDirId)) ou Drive introuvable (code 404). Veuillez choisir un dossier existant.")
         } else if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
             if let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let errorObj = errorJson["error"] as? [String: Any],
@@ -267,6 +267,7 @@ class KDriveService: ObservableObject {
         items: [MediaItem],
         galleryStore: GalleryStore,
         settings: AppSettings,
+        targetDirectoryId: String? = nil,
         completion: @escaping (_ successCount: Int, _ failedCount: Int, _ errorMessage: String?) -> Void
     ) {
         guard settings.isKDriveConfigured else {
@@ -282,6 +283,13 @@ class KDriveService: ObservableObject {
         totalFilesCount = items.count
         currentFileName = ""
         lastError = nil
+
+        let destDirectoryId: String
+        if let customDir = targetDirectoryId?.trimmingCharacters(in: .whitespacesAndNewlines), !customDir.isEmpty {
+            destDirectoryId = customDir
+        } else {
+            destDirectoryId = settings.kDriveDirectoryId
+        }
 
         activeTask = Task {
             var success = 0
@@ -311,7 +319,7 @@ class KDriveService: ObservableObject {
                         fileSize: item.fileSize,
                         token: settings.kDriveApiToken,
                         driveId: settings.kDriveId,
-                        directoryId: settings.kDriveDirectoryId
+                        directoryId: destDirectoryId
                     )
                     success += 1
                 } catch {
