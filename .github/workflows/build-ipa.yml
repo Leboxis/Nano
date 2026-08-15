@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14
@@ -54,9 +57,21 @@ jobs:
           zip -r Nano.ipa Payload/
           rm -rf Payload
 
-      - name: Upload IPA Artifact
+      - name: Upload IPA Artifact (Zip)
         uses: actions/upload-artifact@v4
         with:
           name: Nano-IPA
           path: build/Nano.ipa
           retention-days: 90
+
+      - name: Publish Direct IPA Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          name: "Nano - Dernière version"
+          body: "Dernière version compilée de Nano. Téléchargement direct du fichier `.ipa` sans archive ZIP."
+          files: build/Nano.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
