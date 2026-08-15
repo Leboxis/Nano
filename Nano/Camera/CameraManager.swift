@@ -486,43 +486,48 @@ class CameraManager: NSObject, ObservableObject {
 
             // Safe bound checking on iOS 16+ to guarantee settings.maxPhotoDimensions <= photoOutput.maxPhotoDimensions
             if #available(iOS 16.0, *), let camera = self.currentCamera, let photoOutput = self.photoOutput {
-                let outputMaxDims = photoOutput.maxPhotoDimensions
-                if outputMaxDims.width > 0 && outputMaxDims.height > 0 {
-                    let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
-                    let targetMP = self.photoMegapixels
-
-                    let desiredWidth: Int32
-                    switch targetMP {
-                    case 8: desiredWidth = 3264
-                    case 12: desiredWidth = 4032
-                    case 24: desiredWidth = 5712
-                    case 48: desiredWidth = 8064
-                    default: desiredWidth = 5712
+                // Ensure output ceiling is initialized to active format's max
+                if let maxDim = camera.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
+                    if photoOutput.maxPhotoDimensions.width < maxDim.width {
+                        photoOutput.maxPhotoDimensions = maxDim
                     }
-
-                    // Filter candidates that do NOT exceed photoOutput's ceiling
-                    let validCandidates = supportedDims.filter {
-                        $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
-                    }
-
-                    var chosenDims = outputMaxDims
-                    if !validCandidates.isEmpty {
-                        var match = validCandidates.last!
-                        for dims in validCandidates {
-                            if dims.width <= desiredWidth {
-                                match = dims
-                            }
-                            if dims.width == desiredWidth {
-                                match = dims
-                                break
-                            }
-                        }
-                        chosenDims = match
-                    }
-
-                    settings.maxPhotoDimensions = chosenDims
-                    print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting (ceiling: \(outputMaxDims.width)x\(outputMaxDims.height))")
                 }
+
+                let outputMaxDims = photoOutput.maxPhotoDimensions
+                let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
+                let targetMP = self.photoMegapixels
+
+                let desiredWidth: Int32
+                switch targetMP {
+                case 8: desiredWidth = 3264
+                case 12: desiredWidth = 4032
+                case 24: desiredWidth = 5712
+                case 48: desiredWidth = 8064
+                default: desiredWidth = 5712
+                }
+
+                // Filter candidates that do NOT exceed photoOutput's ceiling
+                let validCandidates = supportedDims.filter {
+                    $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
+                }
+
+                var chosenDims = outputMaxDims
+                if !validCandidates.isEmpty {
+                    var match = validCandidates.last!
+                    for dims in validCandidates {
+                        if dims.width <= desiredWidth {
+                            match = dims
+                        }
+                        if dims.width == desiredWidth {
+                            match = dims
+                            break
+                        }
+                    }
+                    chosenDims = match
+                }
+
+                settings.maxPhotoDimensions = chosenDims
+                print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting (ceiling: \(outputMaxDims.width)x\(outputMaxDims.height))")
             }
 
             // Configure native AVFoundation photo mirroring for front camera
