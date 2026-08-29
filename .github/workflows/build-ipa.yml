@@ -75,13 +75,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update LiveContainer Source
+      - name: Update LiveContainer Source & Bump Version
         if: github.ref == 'refs/heads/main'
         run: |
           python3 - <<'PYEOF'
           import json, re, subprocess, datetime
 
-          version = re.search(r'MARKETING_VERSION:\s*"([^"]+)"', open("project.yml").read()).group(1)
+          proj = open("project.yml").read()
+          match = re.search(r'MARKETING_VERSION:\s*"(\d+)\.(\d+)\.(\d+)"', proj)
+          major, minor, patch = map(int, match.groups())
+          version = f"{major}.{minor}.{patch}"
+
           size = subprocess.run(["stat", "-f%z", "build/Nano.ipa"], capture_output=True, text=True).stdout.strip()
 
           source = {
@@ -103,11 +107,14 @@ jobs:
           with open("apps.json", "w") as f:
               json.dump(source, f, indent=2)
               f.write("\n")
+
+          bumped = proj[:match.start()] + f'MARKETING_VERSION: "{major}.{minor}.{patch + 1}"' + proj[match.end():]
+          open("project.yml", "w").write(bumped)
           PYEOF
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps.json
-          git diff --cached --quiet || git commit -m "chore: update LiveContainer source [skip ci]"
+          git add apps.json project.yml
+          git diff --cached --quiet || git commit -m "chore: update LiveContainer source & bump version [skip ci]"
           git push
 

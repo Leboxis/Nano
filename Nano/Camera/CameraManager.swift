@@ -41,7 +41,8 @@ class CameraManager: NSObject, ObservableObject {
 
     private var photoMegapixels: Int {
         let val = defaults.integer(forKey: "photoMegapixels")
-        return val > 0 ? val : 24
+        let valid: [Int] = useFrontCamera ? [12] : [24, 48]
+        return valid.contains(val) ? val : (useFrontCamera ? 12 : 24)
     }
 
     private var videoQuality: String {

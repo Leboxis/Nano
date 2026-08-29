@@ -13,10 +13,13 @@ struct SettingsView: View {
     @State private var showToken = false
     @State private var showFolderPicker = false
 
-    private let megapixelOptions = [8, 12, 24, 48]
     private let videoQualityOptions = ["480p", "720p", "1080p", "4K"]
     private let fpsOptions = [30, 60]
     private let zoomOptions = [1, 2, 3]
+
+    private var megapixelOptions: [Int] {
+        settings.useFrontCamera ? [12] : [24, 48]
+    }
 
     enum ConnectionStatus {
         case success(String)
@@ -66,6 +69,7 @@ struct SettingsView: View {
                                         isSelected: !settings.useFrontCamera,
                                         action: {
                                             settings.useFrontCamera = false
+                                            normalizeMegapixels()
                                             cameraManager.switchCamera(toFront: false)
                                         }
                                     )
@@ -74,6 +78,7 @@ struct SettingsView: View {
                                         isSelected: settings.useFrontCamera,
                                         action: {
                                             settings.useFrontCamera = true
+                                            normalizeMegapixels()
                                             cameraManager.switchCamera(toFront: true)
                                         }
                                     )
@@ -352,10 +357,25 @@ struct SettingsView: View {
             KDriveFolderPickerView()
                 .environmentObject(settings)
         }
+        .onAppear {
+            normalizeMegapixels()
+        }
+        .onChange(of: settings.useFrontCamera) { _ in
+            normalizeMegapixels()
+        }
         .statusBarHidden(true)
     }
 
     // MARK: - Actions
+
+    private func normalizeMegapixels() {
+        let valid: [Int] = settings.useFrontCamera ? [12] : [24, 48]
+        if !valid.contains(photoMegapixels) {
+            let fallback = settings.useFrontCamera ? 12 : 24
+            photoMegapixels = fallback
+            cameraManager.updateMegapixels(fallback)
+        }
+    }
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
