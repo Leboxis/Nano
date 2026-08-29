@@ -75,3 +75,39 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Update LiveContainer Source
+        if: github.ref == 'refs/heads/main'
+        run: |
+          python3 - <<'PYEOF'
+          import json, re, subprocess, datetime
+
+          version = re.search(r'MARKETING_VERSION:\s*"([^"]+)"', open("project.yml").read()).group(1)
+          size = subprocess.run(["stat", "-f%z", "build/Nano.ipa"], capture_output=True, text=True).stdout.strip()
+
+          source = {
+              "name": "Nano Source",
+              "identifier": "com.nano.app.source",
+              "sourceURL": "https://raw.githubusercontent.com/Leboxis/Nano/main/apps.json",
+              "apps": [
+                  {
+                      "name": "Nano",
+                      "bundleIdentifier": "com.nano.app",
+                      "version": version,
+                      "versionDate": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      "downloadURL": "https://github.com/Leboxis/Nano/releases/latest/download/Nano.ipa",
+                      "size": int(size)
+                  }
+              ]
+          }
+
+          with open("apps.json", "w") as f:
+              json.dump(source, f, indent=2)
+              f.write("\n")
+          PYEOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps.json
+          git diff --cached --quiet || git commit -m "chore: update LiveContainer source [skip ci]"
+          git push
+
