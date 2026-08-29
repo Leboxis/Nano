@@ -1,0 +1,15 @@
+{
+  "name": "Nano Source",
+  "identifier": "com.nano.app.source",
+  "sourceURL": "https://raw.githubusercontent.com/Leboxis/Nano/main/apps.json",
+  "apps": [
+    {
+      "name": "Nano",
+      "bundleIdentifier": "com.nano.app",
+      "version": "1.0.0",
+      "versionDate": "2026-08-29T00:00:00Z",
+      "downloadURL": "https://github.com/Leboxis/Nano/releases/latest/download/Nano.ipa",
+      "size": 0
+    }
+  ]
+}

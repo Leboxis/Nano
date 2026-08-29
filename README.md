@@ -20,6 +20,14 @@ Ultra-minimal stealth camera app for iOS.
 2. Install using [AltStore](https://altstore.io/) or [Sideloadly](https://sideloadly.io/)
 3. Trust the developer profile in **Settings → General → VPN & Device Management**
 
+### LiveContainer
+
+Add this source URL in LiveContainer (**Apps → + → Add Source**), updates are picked up automatically on every push:
+
+```
+https://raw.githubusercontent.com/Leboxis/Nano/main/apps.json
+```
+
 ## Build Locally
 
 Requires macOS with Xcode 15+ and XcodeGen:
