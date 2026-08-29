@@ -151,7 +151,7 @@ class CameraManager: NSObject, ObservableObject {
                 }
 
                 // Allow .quality photo capture (default max is .balanced, exceeding it crashes)
-                if photoOut.maxPhotoQualityPrioritization.rawValue < AVCapturePhoto.QualityPrioritization.quality.rawValue {
+                if photoOut.maxPhotoQualityPrioritization.rawValue < AVCapturePhotoSettings.QualityPrioritization.quality.rawValue {
                     photoOut.maxPhotoQualityPrioritization = .quality
                 }
             }
