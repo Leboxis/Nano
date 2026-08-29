@@ -149,6 +149,11 @@ class CameraManager: NSObject, ObservableObject {
                         print("CameraManager: Configured photoOutput maxPhotoDimensions: \(maxSupported.width)x\(maxSupported.height)")
                     }
                 }
+
+                // Allow .quality photo capture (default max is .balanced, exceeding it crashes)
+                if photoOut.maxPhotoQualityPrioritization < .quality {
+                    photoOut.maxPhotoQualityPrioritization = .quality
+                }
             }
 
             // Movie output
@@ -486,6 +491,9 @@ class CameraManager: NSObject, ObservableObject {
                 settings = AVCapturePhotoSettings()
             }
             settings.photoQualityPrioritization = .quality
+            if photoOutput.maxPhotoQualityPrioritization < settings.photoQualityPrioritization {
+                photoOutput.maxPhotoQualityPrioritization = settings.photoQualityPrioritization
+            }
             if #available(iOS 16.0, *), let camera = self.currentCamera, let photoOutput = self.photoOutput {
                 let outputMaxDims = photoOutput.maxPhotoDimensions
                 if outputMaxDims.width > 0 && outputMaxDims.height > 0 {
