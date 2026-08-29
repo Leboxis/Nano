@@ -367,26 +367,9 @@ class KDriveService: ObservableObject {
             var uploadedIds: [UUID] = []
             var inFlightProgress: [UUID: Double] = [:]
 
-            func reportGlobalProgress() {
+            @MainActor func reportGlobalProgress() {
                 let inFlightSum = inFlightProgress.values.reduce(0.0, +)
                 self.currentProgress = min(1.0, (Double(completed) + inFlightSum) / Double(max(1, items.count)))
-            }
-
-            func handleResult(item: MediaItem, result: Result<Void, Error>) {
-                completed += 1
-                inFlightProgress[item.id] = nil
-                switch result {
-                case .success:
-                    success += 1
-                    uploadedIds.append(item.id)
-                case .failure(let error):
-                    failed += 1
-                    lastErrorMessage = error.localizedDescription
-                    print("KDrive upload error for \(item.filename): \(error)")
-                }
-                self.currentFileIndex = completed
-                self.currentFileName = item.filename
-                reportGlobalProgress()
             }
 
             let chunks = stride(from: 0, to: items.count, by: 2).map { Array(items[$0..<min($0 + 2, items.count)]) }
@@ -404,7 +387,7 @@ class KDriveService: ObservableObject {
                             }
 
                             do {
-                                try await uploadWithRetry(
+                                try await self.uploadWithRetry(
                                     fileURL: fileURL,
                                     fileName: item.filename,
                                     fileSize: item.fileSize,
@@ -412,7 +395,7 @@ class KDriveService: ObservableObject {
                                     driveId: driveId,
                                     directoryId: destDirectoryId,
                                     progressHandler: { fraction in
-                                        DispatchQueue.main.async {
+                                        Task { @MainActor in
                                             inFlightProgress[item.id] = fraction
                                             reportGlobalProgress()
                                         }
@@ -426,7 +409,22 @@ class KDriveService: ObservableObject {
                     }
 
                     for await (item, result) in group {
-                        handleResult(item: item, result: result)
+                        await MainActor.run {
+                            completed += 1
+                            inFlightProgress[item.id] = nil
+                            switch result {
+                            case .success:
+                                success += 1
+                                uploadedIds.append(item.id)
+                            case .failure(let error):
+                                failed += 1
+                                lastErrorMessage = error.localizedDescription
+                                print("KDrive upload error for \(item.filename): \(error)")
+                            }
+                            self.currentFileIndex = completed
+                            self.currentFileName = item.filename
+                            reportGlobalProgress()
+                        }
                     }
                 }
             }
