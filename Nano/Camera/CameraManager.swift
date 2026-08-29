@@ -8,6 +8,7 @@ class CameraManager: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var captureMode: CaptureMode = .photo
     @Published var isSessionRunning = false
+    @Published var captureErrorMessage: String?
 
     private var captureSession: AVCaptureSession?
     private var photoOutput: AVCapturePhotoOutput?
@@ -20,9 +21,6 @@ class CameraManager: NSObject, ObservableObject {
     private let defaults = UserDefaults.standard
 
     var galleryStore: GalleryStore?
-
-    // Burst
-    private var isBursting = false
 
     override init() {
         super.init()
@@ -52,6 +50,7 @@ class CameraManager: NSObject, ObservableObject {
 
     private var videoFPS: Int {
         let val = defaults.integer(forKey: "videoFPS")
+        if val > 60 { return 60 }
         return val > 0 ? val : 60
     }
 
@@ -102,18 +101,6 @@ class CameraManager: NSObject, ObservableObject {
             let session = AVCaptureSession()
             session.beginConfiguration()
             session.automaticallyConfiguresApplicationAudioSession = false
-
-            // Explicitly allow haptics & system sounds during recording
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                try audioSession.setCategory(.playAndRecord, mode: .videoRecording, options: [.mixWithOthers, .defaultToSpeaker])
-                if #available(iOS 13.0, *) {
-                    try audioSession.setAllowHapticsAndSystemSoundsDuringRecording(true)
-                }
-                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            } catch {
-                print("CameraManager: Failed to configure audio session: \(error)")
-            }
 
             // Camera input
             let position: AVCaptureDevice.Position = self.useFrontCamera ? .front : .back
@@ -450,7 +437,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    private func triggerBurstStopHaptic() {
+    private func triggerRecordingStopHaptic() {
         guard vibrationsEnabled else { return }
         DispatchQueue.main.async {
             for i in 0..<4 {
@@ -460,6 +447,21 @@ class CameraManager: NSObject, ObservableObject {
                     generator.impactOccurred()
                     AudioServicesPlaySystemSound(1521)
                 }
+            }
+        }
+    }
+
+    private func triggerErrorHaptic() {
+        guard vibrationsEnabled else { return }
+        DispatchQueue.main.async {
+            let generator = UIImpactFeedbackGenerator(style: .heavy)
+            generator.prepare()
+            generator.impactOccurred()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                let second = UIImpactFeedbackGenerator(style: .heavy)
+                second.prepare()
+                second.impactOccurred()
             }
         }
     }
@@ -483,51 +485,45 @@ class CameraManager: NSObject, ObservableObject {
             } else {
                 settings = AVCapturePhotoSettings()
             }
-
-            // Safe bound checking on iOS 16+ to guarantee settings.maxPhotoDimensions <= photoOutput.maxPhotoDimensions
+            settings.photoQualityPrioritization = .quality
             if #available(iOS 16.0, *), let camera = self.currentCamera, let photoOutput = self.photoOutput {
-                // Ensure output ceiling is initialized to active format's max
-                if let maxDim = camera.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width < $1.width }) {
-                    if photoOutput.maxPhotoDimensions.width < maxDim.width {
-                        photoOutput.maxPhotoDimensions = maxDim
-                    }
-                }
-
                 let outputMaxDims = photoOutput.maxPhotoDimensions
-                let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
-                let targetMP = self.photoMegapixels
+                if outputMaxDims.width > 0 && outputMaxDims.height > 0 {
+                    let supportedDims = camera.activeFormat.supportedMaxPhotoDimensions
+                    let targetMP = self.photoMegapixels
 
-                let desiredWidth: Int32
-                switch targetMP {
-                case 8: desiredWidth = 3264
-                case 12: desiredWidth = 4032
-                case 24: desiredWidth = 5712
-                case 48: desiredWidth = 8064
-                default: desiredWidth = 5712
-                }
-
-                // Filter candidates that do NOT exceed photoOutput's ceiling
-                let validCandidates = supportedDims.filter {
-                    $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
-                }
-
-                var chosenDims = outputMaxDims
-                if !validCandidates.isEmpty {
-                    var match = validCandidates.last!
-                    for dims in validCandidates {
-                        if dims.width <= desiredWidth {
-                            match = dims
-                        }
-                        if dims.width == desiredWidth {
-                            match = dims
-                            break
-                        }
+                    let desiredWidth: Int32
+                    switch targetMP {
+                    case 8: desiredWidth = 3264
+                    case 12: desiredWidth = 4032
+                    case 24: desiredWidth = 5712
+                    case 48: desiredWidth = 8064
+                    default: desiredWidth = 5712
                     }
-                    chosenDims = match
-                }
 
-                settings.maxPhotoDimensions = chosenDims
-                print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting (ceiling: \(outputMaxDims.width)x\(outputMaxDims.height))")
+                    // Filter candidates that do NOT exceed photoOutput's ceiling
+                    let validCandidates = supportedDims.filter {
+                        $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
+                    }
+
+                    var chosenDims = outputMaxDims
+                    if !validCandidates.isEmpty {
+                        var match = validCandidates.last!
+                        for dims in validCandidates {
+                            if dims.width <= desiredWidth {
+                                match = dims
+                            }
+                            if dims.width == desiredWidth {
+                                match = dims
+                                break
+                            }
+                        }
+                        chosenDims = match
+                    }
+
+                    settings.maxPhotoDimensions = chosenDims
+                    print("CameraManager: Capturing photo at \(chosenDims.width)x\(chosenDims.height) for \(targetMP) MP setting (ceiling: \(outputMaxDims.width)x\(outputMaxDims.height))")
+                }
             }
 
             // Configure native AVFoundation photo mirroring for front camera
@@ -543,48 +539,6 @@ class CameraManager: NSObject, ObservableObject {
 
             photoOutput.capturePhoto(with: settings, delegate: self)
         }
-    }
-
-    // MARK: - Native Hardware Burst Capture
-
-    func startBurst() {
-        guard !isBursting else { return }
-        isBursting = true
-
-        sessionQueue.async { [weak self] in
-            self?.captureNextBurstPhoto()
-        }
-    }
-
-    func stopBurst() {
-        isBursting = false
-        triggerBurstStopHaptic()
-    }
-
-    private func captureNextBurstPhoto() {
-        guard isBursting, let photoOutput = photoOutput else { return }
-
-        triggerHaptic(.light)
-
-        let settings: AVCapturePhotoSettings
-        if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
-            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
-        } else {
-            settings = AVCapturePhotoSettings()
-        }
-        settings.photoQualityPrioritization = .speed
-
-        if let connection = photoOutput.connection(with: .video) {
-            if connection.isVideoOrientationSupported {
-                connection.videoOrientation = .portrait
-            }
-            if connection.isVideoMirroringSupported {
-                connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = self.useFrontCamera
-            }
-        }
-
-        photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
     // MARK: - Video Recording (Untouched)
@@ -638,24 +592,23 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         if let error = error {
-            print("CameraManager: Photo capture error: \(error.localizedDescription)")
+            print("CameraManager: Photo capture error: \(error)")
+            DispatchQueue.main.async {
+                self.captureErrorMessage = "Échec de la capture photo"
+            }
+            triggerErrorHaptic()
             return
         }
 
-        // Save native Apple photo representation directly
-        if let data = photo.fileDataRepresentation() {
-            print("CameraManager: Processing captured photo data (\(data.count) bytes)")
-            galleryStore?.savePhoto(data: data)
-        } else {
-            print("CameraManager: Unable to extract fileDataRepresentation from AVCapturePhoto")
+        guard let data = photo.fileDataRepresentation() else {
+            DispatchQueue.main.async {
+                self.captureErrorMessage = "Impossible de lire la photo"
+            }
+            triggerErrorHaptic()
+            return
         }
 
-        // If native burst is active, trigger next frame immediately
-        if isBursting {
-            sessionQueue.async { [weak self] in
-                self?.captureNextBurstPhoto()
-            }
-        }
+        galleryStore?.savePhoto(data: data)
     }
 }
 
@@ -668,11 +621,14 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
                     error: Error?) {
         DispatchQueue.main.async { [weak self] in
             self?.isRecording = false
-            self?.triggerBurstStopHaptic()
+            self?.triggerRecordingStopHaptic()
         }
 
         if let error = error {
             print("CameraManager: Recording error: \(error)")
+            DispatchQueue.main.async { [weak self] in
+                self?.captureErrorMessage = "Échec de l'enregistrement vidéo"
+            }
             return
         }
 

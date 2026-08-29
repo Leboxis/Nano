@@ -209,13 +209,31 @@ class KDriveService: ObservableObject {
     }
 
     // MARK: - Upload Single File
+
+    private final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
+        let onProgress: (Int64, Int64) -> Void
+
+        init(onProgress: @escaping (Int64, Int64) -> Void) {
+            self.onProgress = onProgress
+        }
+
+        func urlSession(_ session: URLSession,
+                        task: URLSessionTask,
+                        didSendBodyData bytesSent: Int64,
+                        totalBytesSent: Int64,
+                        totalBytesExpectedToSend: Int64) {
+            onProgress(totalBytesSent, max(1, totalBytesExpectedToSend))
+        }
+    }
+
     func uploadFile(
         fileURL: URL,
         fileName: String,
         fileSize: Int64,
         token: String,
         driveId: String,
-        directoryId: String
+        directoryId: String,
+        progressHandler: ((Double) -> Void)? = nil
     ) async throws {
         let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanDriveId = driveId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -242,7 +260,13 @@ class KDriveService: ObservableObject {
         request.setValue("Bearer \(cleanToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await URLSession.shared.upload(for: request, fromFile: fileURL)
+        let delegate = UploadProgressDelegate { sent, total in
+            progressHandler?(Double(sent) / Double(total))
+        }
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+
+        let (data, response) = try await session.upload(for: request, fromFile: fileURL)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw KDriveError.serverError(0, "Réponse inattendue du serveur")
@@ -262,7 +286,46 @@ class KDriveService: ObservableObject {
         }
     }
 
+    private func uploadWithRetry(
+        fileURL: URL,
+        fileName: String,
+        fileSize: Int64,
+        token: String,
+        driveId: String,
+        directoryId: String,
+        progressHandler: ((Double) -> Void)? = nil
+    ) async throws {
+        let maxAttempts = 2
+
+        for attempt in 1...maxAttempts {
+            do {
+                try await uploadFile(
+                    fileURL: fileURL,
+                    fileName: fileName,
+                    fileSize: fileSize,
+                    token: token,
+                    driveId: driveId,
+                    directoryId: directoryId,
+                    progressHandler: progressHandler
+                )
+                return
+            } catch let error as KDriveError {
+                switch error {
+                case .invalidConfiguration, .invalidURL, .authenticationFailed, .driveNotFound, .cancelled:
+                    throw error
+                default:
+                    if attempt == maxAttempts { throw error }
+                }
+            } catch {
+                if attempt == maxAttempts { throw error }
+            }
+
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+    }
+
     // MARK: - Batch Upload
+
     func uploadBatch(
         items: [MediaItem],
         galleryStore: GalleryStore,
@@ -291,46 +354,89 @@ class KDriveService: ObservableObject {
             destDirectoryId = settings.kDriveDirectoryId
         }
 
+        let token = settings.kDriveApiToken
+        let driveId = settings.kDriveId
+        let deleteAfterUpload = settings.deleteAfterUpload
+        let fileURLs = Dictionary(uniqueKeysWithValues: items.map { ($0.id, galleryStore.getFullPath(for: $0)) })
+
         activeTask = Task {
             var success = 0
             var failed = 0
+            var completed = 0
             var lastErrorMessage: String? = nil
+            var uploadedIds: [UUID] = []
+            var inFlightProgress: [UUID: Double] = [:]
 
-            for (index, item) in items.enumerated() {
-                if Task.isCancelled {
-                    break
-                }
+            func reportGlobalProgress() {
+                let inFlightSum = inFlightProgress.values.reduce(0.0, +)
+                self.currentProgress = min(1.0, (Double(completed) + inFlightSum) / Double(max(1, items.count)))
+            }
 
-                self.currentFileIndex = index + 1
-                self.currentFileName = item.filename
-                self.currentProgress = Double(index) / Double(max(1, items.count))
-
-                let fileURL = galleryStore.getFullPath(for: item)
-
-                guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                    failed += 1
-                    continue
-                }
-
-                do {
-                    try await uploadFile(
-                        fileURL: fileURL,
-                        fileName: item.filename,
-                        fileSize: item.fileSize,
-                        token: settings.kDriveApiToken,
-                        driveId: settings.kDriveId,
-                        directoryId: destDirectoryId
-                    )
+            func handleResult(item: MediaItem, result: Result<Void, Error>) {
+                completed += 1
+                inFlightProgress[item.id] = nil
+                switch result {
+                case .success:
                     success += 1
-                } catch {
+                    uploadedIds.append(item.id)
+                case .failure(let error):
                     failed += 1
                     lastErrorMessage = error.localizedDescription
                     print("KDrive upload error for \(item.filename): \(error)")
+                }
+                self.currentFileIndex = completed
+                self.currentFileName = item.filename
+                reportGlobalProgress()
+            }
+
+            let chunks = stride(from: 0, to: items.count, by: 2).map { Array(items[$0..<min($0 + 2, items.count)]) }
+
+            for chunk in chunks {
+                if Task.isCancelled { break }
+
+                await withTaskGroup(of: (MediaItem, Result<Void, Error>).self) { group in
+                    for item in chunk {
+                        group.addTask {
+                            let fileURL = fileURLs[item.id] ?? URL(fileURLWithPath: "/dev/null")
+
+                            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                                return (item, .failure(KDriveError.uploadFailed("Fichier introuvable sur l'appareil")))
+                            }
+
+                            do {
+                                try await uploadWithRetry(
+                                    fileURL: fileURL,
+                                    fileName: item.filename,
+                                    fileSize: item.fileSize,
+                                    token: token,
+                                    driveId: driveId,
+                                    directoryId: destDirectoryId,
+                                    progressHandler: { fraction in
+                                        DispatchQueue.main.async {
+                                            inFlightProgress[item.id] = fraction
+                                            reportGlobalProgress()
+                                        }
+                                    }
+                                )
+                                return (item, .success(()))
+                            } catch {
+                                return (item, .failure(error))
+                            }
+                        }
+                    }
+
+                    for await (item, result) in group {
+                        handleResult(item: item, result: result)
+                    }
                 }
             }
 
             self.currentProgress = 1.0
             self.isUploading = false
+
+            if deleteAfterUpload && !Task.isCancelled && !uploadedIds.isEmpty {
+                galleryStore.deleteItems(ids: Set(uploadedIds))
+            }
 
             if Task.isCancelled {
                 completion(success, failed, "Upload annulé.")

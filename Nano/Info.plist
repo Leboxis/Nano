@@ -24,7 +24,7 @@
     <true/>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
-        <string>armv7</string>
+        <string>arm64</string>
     </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
@@ -36,8 +36,6 @@
     <string>Nano a besoin d'accéder à votre caméra pour prendre des photos et vidéos.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Nano a besoin d'accéder au microphone pour enregistrer le son des vidéos.</string>
-    <key>NSPhotoLibraryUsageDescription</key>
-    <string>Nano peut exporter vos médias vers la photothèque.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>Nano utilise Face ID pour sécuriser l'accès à votre galerie privée.</string>
     <key>UIApplicationSupportsIndirectInputEvents</key>

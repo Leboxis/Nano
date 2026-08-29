@@ -27,6 +27,7 @@ class AppSettings: ObservableObject {
     @AppStorage("kDriveId") var kDriveId: String = ""
     @AppStorage("kDriveDirectoryId") var kDriveDirectoryId: String = "1"
     @AppStorage("kDriveDirectoryName") var kDriveDirectoryName: String = "Racine (kDrive)"
+    @AppStorage("deleteAfterUpload") var deleteAfterUpload: Bool = false
 
     var isKDriveConfigured: Bool {
         !kDriveApiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&

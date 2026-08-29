@@ -6,9 +6,8 @@ Ultra-minimal stealth camera app for iOS.
 
 - **Black screen** — No visible camera UI, just a pitch-black screen
 - **Tap** — Take a photo (photo mode) or start/stop recording (video mode)
-- **Long press** — Burst photo capture
 - **Swipe left** — Private gallery with multi-selection & export
-- **Infomaniak kDrive Sync** — One-tap batch upload of the entire gallery or selected items to your Infomaniak kDrive
+- **Infomaniak kDrive Sync** — One-tap batch upload of the entire gallery or selected items to your Infomaniak kDrive (2 parallel uploads, automatic retry, byte-level progress & optional local delete after upload)
 - **Swipe right** — Settings (megapixels, video quality, capture mode, kDrive configuration & test)
 - **Auto-dim** — Screen brightness set to minimum on launch
 - **Haptic feedback** — Vibration on video stop, light tap on photo capture
@@ -49,9 +48,15 @@ Nano/
 │   │   ├── NanoApp.swift          # Entry point, brightness control
 │   │   └── ContentView.swift      # Page navigation (3 swipeable pages)
 │   ├── Views/
-│   │   ├── CameraView.swift       # Black screen + tap/long press gestures
+│   │   ├── CameraView.swift       # Black screen + tap gesture
 │   │   ├── SettingsView.swift     # Mode, MP, video quality & kDrive settings
-│   │   ├── GalleryView.swift      # Private gallery with selection, export & kDrive upload
+│   │   ├── GalleryView.swift      # Private gallery with Face ID, selection & export
+│   │   ├── ThumbnailCell.swift    # Gallery grid cell with cached thumbnails
+│   │   ├── MediaPreview.swift     # Full-screen pager & single media preview
+│   │   ├── VideoPlayerView.swift  # Interactive video player with scrubber
+│   │   ├── ZoomableImageView.swift # Zoomable photo preview (UIScrollView)
+│   │   ├── ShareSheet.swift       # Shared UIActivityViewController presenter
+│   │   ├── KDriveFolderPickerView.swift # kDrive folder browser & creator
 │   │   └── KDriveUploadSheet.swift # kDrive upload progress modal
 │   ├── Camera/
 │   │   └── CameraManager.swift    # AVFoundation session management

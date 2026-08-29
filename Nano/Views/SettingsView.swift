@@ -15,7 +15,7 @@ struct SettingsView: View {
 
     private let megapixelOptions = [8, 12, 24, 48]
     private let videoQualityOptions = ["480p", "720p", "1080p", "4K"]
-    private let fpsOptions = [30, 60, 90, 120]
+    private let fpsOptions = [30, 60]
     private let zoomOptions = [1, 2, 3]
 
     enum ConnectionStatus {
@@ -257,6 +257,20 @@ struct SettingsView: View {
                                 .opacity(settings.isKDriveConfigured ? 1.0 : 0.4)
                             }
 
+                            // Delete after upload
+                            Toggle(isOn: $settings.deleteAfterUpload) {
+                                HStack {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(Color.white.opacity(0.6))
+                                        .frame(width: 20)
+                                    Text("Supprimer localement après l'envoi")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .tint(Color.white)
+
                             // Test Connection Button
                             Button(action: testConnection) {
                                 HStack(spacing: 8) {
@@ -324,8 +338,8 @@ struct SettingsView: View {
                     // App Info
                     settingsSection(title: "À propos") {
                         VStack(alignment: .leading, spacing: 8) {
-                            infoRow(label: "Version", value: "1.0.0")
-                            infoRow(label: "Build", value: "1")
+                            infoRow(label: "Version", value: appVersion)
+                            infoRow(label: "Build", value: appBuild)
                         }
                     }
 
@@ -342,6 +356,15 @@ struct SettingsView: View {
     }
 
     // MARK: - Actions
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    private var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+
     private func pasteToken() {
         if let clip = UIPasteboard.general.string {
             settings.kDriveApiToken = clip.trimmingCharacters(in: .whitespacesAndNewlines)
