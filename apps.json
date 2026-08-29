@@ -6,10 +6,10 @@
     {
       "name": "Nano",
       "bundleIdentifier": "com.nano.app",
-      "version": "1.0.0",
-      "versionDate": "2026-08-29T09:35:35Z",
+      "version": "1.0.1",
+      "versionDate": "2026-08-29T10:11:44Z",
       "downloadURL": "https://github.com/Leboxis/Nano/releases/latest/download/Nano.ipa",
-      "size": 2168959
+      "size": 2171479
     }
   ]
 }
