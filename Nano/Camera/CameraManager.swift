@@ -29,6 +29,7 @@ class CameraManager: NSObject, ObservableObject {
             "photoMegapixels": 24,
             "videoQuality": "4K",
             "videoFPS": 60,
+            "videoStabilization": true,
             "zoomLevel": 1,
             "useFrontCamera": false,
             "lastMode": "photo"
@@ -53,6 +54,10 @@ class CameraManager: NSObject, ObservableObject {
         let val = defaults.integer(forKey: "videoFPS")
         if val > 60 { return 60 }
         return val > 0 ? val : 60
+    }
+
+    private var videoStabilizationEnabled: Bool {
+        defaults.object(forKey: "videoStabilization") as? Bool ?? true
     }
 
     private var zoomLevel: Int {
@@ -171,6 +176,7 @@ class CameraManager: NSObject, ObservableObject {
             if self.captureMode == .video {
                 self.applyVideoFormatAndFPS()
             }
+            self.applyVideoStabilization()
         }
     }
 
@@ -289,6 +295,27 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Video Stabilization (rear camera only, standard mode = slight digital crop)
+
+    private func applyVideoStabilization() {
+        guard let movieOutput = movieOutput,
+              let connection = movieOutput.connection(with: .video) else { return }
+
+        let shouldStabilize = videoStabilizationEnabled && !useFrontCamera
+        let mode: AVCaptureVideoStabilizationMode = (shouldStabilize && connection.isVideoStabilizationSupported) ? .standard : .off
+
+        if connection.preferredVideoStabilizationMode != mode {
+            connection.preferredVideoStabilizationMode = mode
+        }
+    }
+
+    func updateVideoStabilization(_ enabled: Bool) {
+        defaults.set(enabled, forKey: "videoStabilization")
+        sessionQueue.async { [weak self] in
+            self?.applyVideoStabilization()
+        }
+    }
+
     // MARK: - Public Update Methods
 
     func updateMode(_ mode: CaptureMode) {
@@ -303,6 +330,7 @@ class CameraManager: NSObject, ObservableObject {
             if mode == .video {
                 self.applyVideoFormatAndFPS()
             }
+            self.applyVideoStabilization()
         }
     }
 
@@ -318,6 +346,7 @@ class CameraManager: NSObject, ObservableObject {
             }
             session.commitConfiguration()
             self.applyVideoFormatAndFPS()
+            self.applyVideoStabilization()
         }
     }
 
@@ -326,6 +355,7 @@ class CameraManager: NSObject, ObservableObject {
 
         sessionQueue.async { [weak self] in
             self?.applyVideoFormatAndFPS()
+            self?.applyVideoStabilization()
         }
     }
 
@@ -416,6 +446,7 @@ class CameraManager: NSObject, ObservableObject {
             if self.captureMode == .video {
                 self.applyVideoFormatAndFPS()
             }
+            self.applyVideoStabilization()
         }
     }
 
@@ -572,6 +603,8 @@ class CameraManager: NSObject, ObservableObject {
                     connection.isVideoMirrored = self.useFrontCamera
                 }
             }
+
+            self.applyVideoStabilization()
 
             movieOutput.startRecording(to: outputURL, recordingDelegate: self)
 

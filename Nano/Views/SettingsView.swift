@@ -179,6 +179,29 @@ struct SettingsView: View {
                                     }
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
+
+                                // Stabilization
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Toggle(isOn: $settings.videoStabilization) {
+                                        HStack {
+                                            Image(systemName: "video.fill")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(Color.white.opacity(0.6))
+                                                .frame(width: 20)
+                                            Text("Stabilisation")
+                                                .font(.system(size: 15, weight: .medium))
+                                                .foregroundColor(.white)
+                                        }
+                                    }
+                                    .tint(Color.white)
+                                    .onChange(of: settings.videoStabilization) { enabled in
+                                        cameraManager.updateVideoStabilization(enabled)
+                                    }
+
+                                    Text("Compense les mouvements avec un léger recadrage numérique. Caméra arrière uniquement.")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(Color.white.opacity(0.35))
+                                }
                             }
                         }
                     }

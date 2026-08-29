@@ -18,6 +18,7 @@ class AppSettings: ObservableObject {
     @AppStorage("photoMegapixels") var photoMegapixels: Int = 24
     @AppStorage("videoQuality") var videoQuality: String = "4K"
     @AppStorage("videoFPS") var videoFPS: Int = 60
+    @AppStorage("videoStabilization") var videoStabilization: Bool = true
     @AppStorage("zoomLevel") var zoomLevel: Int = 1
     @AppStorage("vibrationsEnabled") var vibrationsEnabled: Bool = true
     @AppStorage("useFrontCamera") var useFrontCamera: Bool = false
