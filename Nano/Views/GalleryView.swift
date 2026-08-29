@@ -9,6 +9,11 @@ struct ItemFramePreferenceKey: PreferenceKey {
     }
 }
 
+struct UploadRequest: Identifiable {
+    let id = UUID()
+    let items: [MediaItem]
+}
+
 struct GalleryView: View {
     @EnvironmentObject var galleryStore: GalleryStore
     @EnvironmentObject var settings: AppSettings
@@ -26,8 +31,7 @@ struct GalleryView: View {
         self._selectedTab = selectedTab
     }
 
-    @State private var showKDriveUpload = false
-    @State private var itemsToUpload: [MediaItem] = []
+    @State private var uploadRequest: UploadRequest? = nil
     @State private var showNotConfiguredAlert = false
 
     private let columns = [
@@ -63,8 +67,8 @@ struct GalleryView: View {
                 MediaPreviewPagerView(initialIndex: initialIdx, galleryStore: galleryStore)
             }
         }
-        .sheet(isPresented: $showKDriveUpload) {
-            KDriveUploadSheet(itemsToUpload: itemsToUpload)
+        .sheet(item: $uploadRequest) { request in
+            KDriveUploadSheet(itemsToUpload: request.items)
                 .environmentObject(galleryStore)
                 .environmentObject(settings)
         }
@@ -219,7 +223,7 @@ struct GalleryView: View {
                     self.itemFrames = frames
                 }
                 .highPriorityGesture(
-                    isSelecting ? DragGesture(minimumDistance: 0, coordinateSpace: .named("galleryScrollView"))
+                    isSelecting ? DragGesture(minimumDistance: 12, coordinateSpace: .named("galleryScrollView"))
                         .onChanged { gesture in
                             let loc = gesture.location
 
@@ -403,8 +407,7 @@ struct GalleryView: View {
             showNotConfiguredAlert = true
             return
         }
-        itemsToUpload = galleryStore.items
-        showKDriveUpload = true
+        uploadRequest = UploadRequest(items: galleryStore.items)
     }
 
     private func uploadSelectedToKDrive() {
@@ -412,8 +415,7 @@ struct GalleryView: View {
             showNotConfiguredAlert = true
             return
         }
-        itemsToUpload = galleryStore.items.filter { selectedIds.contains($0.id) }
-        showKDriveUpload = true
+        uploadRequest = UploadRequest(items: galleryStore.items.filter { selectedIds.contains($0.id) })
     }
 
     private func toggleSelection(_ id: UUID) {
