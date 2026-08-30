@@ -170,15 +170,17 @@ class CameraManager: NSObject, ObservableObject {
                 // Allow .quality photo capture (default max is .balanced, exceeding it crashes)
                 photoOut.maxPhotoQualityPrioritization = .quality
 
-                // Burst responsiveness switches (require .quality ceiling, .photo preset, no Live Photo)
-                if photoOut.isZeroShutterLagSupported {
-                    photoOut.isZeroShutterLagEnabled = true
-                }
-                if photoOut.isResponsiveCaptureSupported {
-                    photoOut.isResponsiveCaptureEnabled = true
-                }
-                if photoOut.isFastCapturePrioritizationSupported {
-                    photoOut.isFastCapturePrioritizationEnabled = true
+                // Burst responsiveness switches (iOS 17+, require .quality ceiling, .photo preset, no Live Photo)
+                if #available(iOS 17.0, *) {
+                    if photoOut.isZeroShutterLagSupported {
+                        photoOut.isZeroShutterLagEnabled = true
+                    }
+                    if photoOut.isResponsiveCaptureSupported {
+                        photoOut.isResponsiveCaptureEnabled = true
+                    }
+                    if photoOut.isFastCapturePrioritizationSupported {
+                        photoOut.isFastCapturePrioritizationEnabled = true
+                    }
                 }
             }
 
