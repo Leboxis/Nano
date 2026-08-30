@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("photoMegapixels") private var photoMegapixels: Int = 24
     @AppStorage("videoQuality") private var videoQuality: String = "4K"
     @AppStorage("videoFPS") private var videoFPS: Int = 60
+    @AppStorage("burstQualityMode") private var burstQualityMode: String = "balanced"
 
     @State private var isTestingConnection = false
     @State private var connectionStatus: ConnectionStatus? = nil
@@ -112,24 +113,50 @@ struct SettingsView: View {
                     // Photo Settings
                     if settings.captureMode == .photo {
                         settingsSection(title: "Photo") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Mégapixels")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color.white.opacity(0.6))
+                            VStack(alignment: .leading, spacing: 20) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Mégapixels")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color.white.opacity(0.6))
 
-                                HStack(spacing: 0) {
-                                    ForEach(megapixelOptions, id: \.self) { mp in
+                                    HStack(spacing: 0) {
+                                        ForEach(megapixelOptions, id: \.self) { mp in
+                                            optionButton(
+                                                label: "\(mp) MP",
+                                                isSelected: photoMegapixels == mp,
+                                                action: {
+                                                    photoMegapixels = mp
+                                                    cameraManager.updateMegapixels(mp)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Rafale (appui long)")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(Color.white.opacity(0.6))
+
+                                    HStack(spacing: 0) {
                                         optionButton(
-                                            label: "\(mp) MP",
-                                            isSelected: photoMegapixels == mp,
-                                            action: {
-                                                photoMegapixels = mp
-                                                cameraManager.updateMegapixels(mp)
-                                            }
+                                            label: "Équilibrée",
+                                            isSelected: burstQualityMode == "balanced",
+                                            action: { burstQualityMode = "balanced" }
+                                        )
+                                        optionButton(
+                                            label: "Rapide",
+                                            isSelected: burstQualityMode == "speed",
+                                            action: { burstQualityMode = "speed" }
                                         )
                                     }
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    Text("Équilibrée privilégie la qualité d'image, rapide privilégie le nombre de photos par seconde.")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(Color.white.opacity(0.35))
                                 }
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                         }
                     }

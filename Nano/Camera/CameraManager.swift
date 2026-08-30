@@ -9,6 +9,8 @@ class CameraManager: NSObject, ObservableObject {
     @Published var captureMode: CaptureMode = .photo
     @Published var isSessionRunning = false
     @Published var captureErrorMessage: String?
+    @Published var isBursting = false
+    @Published var burstCount = 0
 
     private var captureSession: AVCaptureSession?
     private var photoOutput: AVCapturePhotoOutput?
@@ -16,6 +18,10 @@ class CameraManager: NSObject, ObservableObject {
     private var currentCamera: AVCaptureDevice?
     private var currentVideoInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
+
+    private var burstActive = false
+    private var burstShotsInFlight = 0
+    private var burstConsecutiveErrors = 0
 
     private let sessionQueue = DispatchQueue(label: "com.nano.camera.session")
     private let defaults = UserDefaults.standard
@@ -32,7 +38,8 @@ class CameraManager: NSObject, ObservableObject {
             "videoStabilization": true,
             "zoomLevel": 1,
             "useFrontCamera": false,
-            "lastMode": "photo"
+            "lastMode": "photo",
+            "burstQualityMode": "balanced"
         ])
         let lastMode = defaults.string(forKey: "lastMode") ?? "photo"
         captureMode = CaptureMode(rawValue: lastMode) ?? .photo
@@ -71,6 +78,10 @@ class CameraManager: NSObject, ObservableObject {
 
     private var useFrontCamera: Bool {
         defaults.bool(forKey: "useFrontCamera")
+    }
+
+    private var burstQualityMode: String {
+        defaults.string(forKey: "burstQualityMode") ?? "balanced"
     }
 
     // MARK: - Permissions
@@ -158,6 +169,17 @@ class CameraManager: NSObject, ObservableObject {
 
                 // Allow .quality photo capture (default max is .balanced, exceeding it crashes)
                 photoOut.maxPhotoQualityPrioritization = .quality
+
+                // Burst responsiveness switches (require .quality ceiling, .photo preset, no Live Photo)
+                if photoOut.isZeroShutterLagSupported {
+                    photoOut.isZeroShutterLagEnabled = true
+                }
+                if photoOut.isResponsiveCaptureSupported {
+                    photoOut.isResponsiveCaptureEnabled = true
+                }
+                if photoOut.isFastCapturePrioritizationSupported {
+                    photoOut.isFastCapturePrioritizationEnabled = true
+                }
             }
 
             // Movie output
@@ -577,6 +599,88 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Burst Mode (long-press, public AVFoundation API)
+
+    func startBurst() {
+        guard captureMode == .photo else { return }
+
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard self.photoOutput != nil, !self.burstActive, self.burstShotsInFlight == 0 else { return }
+
+            self.burstActive = true
+            self.burstShotsInFlight = 0
+            self.burstConsecutiveErrors = 0
+
+            DispatchQueue.main.async {
+                self.isBursting = true
+                self.burstCount = 0
+                self.triggerHaptic(.light)
+            }
+
+            self.captureBurstShot()
+        }
+    }
+
+    func stopBurst() {
+        sessionQueue.async { [weak self] in
+            guard let self = self, self.burstActive else { return }
+            self.burstActive = false
+            if self.burstShotsInFlight == 0 {
+                self.finishBurst()
+            }
+        }
+    }
+
+    private func finishBurst() {
+        DispatchQueue.main.async {
+            self.isBursting = false
+            self.triggerHaptic(.light)
+        }
+    }
+
+    private func captureBurstShot() {
+        // Must run on sessionQueue
+        guard let photoOutput = photoOutput, let camera = currentCamera else { return }
+
+        burstShotsInFlight += 1
+
+        let settings: AVCapturePhotoSettings
+        if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+        } else {
+            settings = AVCapturePhotoSettings()
+        }
+
+        settings.photoQualityPrioritization = (burstQualityMode == "speed") ? .speed : .balanced
+        settings.flashMode = .off
+
+        // Cap at 12 MP sensor-native for throughput (settings inherit the 48 MP output ceiling by default)
+        if #available(iOS 16.0, *) {
+            let outputMaxDims = photoOutput.maxPhotoDimensions
+            if outputMaxDims.width > 0 {
+                let supported = camera.activeFormat.supportedMaxPhotoDimensions.filter {
+                    $0.width <= outputMaxDims.width && $0.height <= outputMaxDims.height
+                }
+                if let best = supported.last(where: { $0.width <= 4032 }) ?? supported.first {
+                    settings.maxPhotoDimensions = best
+                }
+            }
+        }
+
+        if let connection = photoOutput.connection(with: .video) {
+            if connection.isVideoOrientationSupported {
+                connection.videoOrientation = .portrait
+            }
+            if connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = useFrontCamera
+            }
+        }
+
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
     // MARK: - Video Recording (Untouched)
 
     func startRecording() {
@@ -629,6 +733,43 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput,
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            let isBurstPhoto = self.burstActive || self.burstShotsInFlight > 0
+            guard isBurstPhoto else {
+                self.handleSingleShotResult(photo: photo, error: error)
+                return
+            }
+
+            self.burstShotsInFlight -= 1
+
+            if let data = (error == nil) ? photo.fileDataRepresentation() : nil {
+                self.burstConsecutiveErrors = 0
+                DispatchQueue.main.async {
+                    self.burstCount += 1
+                }
+                self.galleryStore?.savePhoto(data: data)
+            } else {
+                print("CameraManager: Burst capture failed: \(String(describing: error))")
+                self.burstConsecutiveErrors += 1
+                if self.burstConsecutiveErrors >= 3 {
+                    self.burstActive = false
+                    DispatchQueue.main.async {
+                        self.captureErrorMessage = "Rafale interrompue"
+                    }
+                }
+            }
+
+            if self.burstActive {
+                self.captureBurstShot()
+            } else if self.burstShotsInFlight == 0 {
+                self.finishBurst()
+            }
+        }
+    }
+
+    private func handleSingleShotResult(photo: AVCapturePhoto, error: Error?) {
         if let error = error {
             print("CameraManager: Photo capture error: \(error)")
             DispatchQueue.main.async {

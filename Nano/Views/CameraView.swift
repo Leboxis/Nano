@@ -6,6 +6,11 @@ struct CameraView: View {
     @EnvironmentObject var galleryStore: GalleryStore
     @EnvironmentObject var settings: AppSettings
 
+    @State private var isPressing = false
+    @State private var longPressTask: Task<Void, Never>?
+
+    private let burstHoldDuration: UInt64 = 400_000_000
+
     init(selectedTab: Binding<Int> = .constant(1)) {
         self._selectedTab = selectedTab
     }
@@ -16,13 +21,9 @@ struct CameraView: View {
         }
         .ignoresSafeArea()
         .simultaneousGesture(
-            TapGesture()
-                .onEnded {
-                    // Only capture if user is on the camera tab and performed a clean tap (not a swipe)
-                    if selectedTab == 1 {
-                        handleTap()
-                    }
-                }
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in handlePressBegan() }
+                .onEnded { _ in handlePressEnded() }
         )
         .overlay(alignment: .top) {
             if let message = captureError {
@@ -42,6 +43,19 @@ struct CameraView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: captureError)
+        .overlay(alignment: .bottom) {
+            if cameraManager.isBursting {
+                Text("\(cameraManager.burstCount)")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.black.opacity(0.55)))
+                    .padding(.bottom, 110)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: cameraManager.isBursting)
         .statusBarHidden(true)
     }
 
@@ -51,7 +65,33 @@ struct CameraView: View {
 
     // MARK: - Gesture Handlers
 
+    private func handlePressBegan() {
+        guard selectedTab == 1, !isPressing else { return }
+        isPressing = true
+
+        longPressTask = Task {
+            try? await Task.sleep(nanoseconds: burstHoldDuration)
+            guard !Task.isCancelled, isPressing else { return }
+            guard settings.captureMode == .photo, !cameraManager.isRecording else { return }
+            cameraManager.startBurst()
+        }
+    }
+
+    private func handlePressEnded() {
+        longPressTask?.cancel()
+        longPressTask = nil
+        guard isPressing else { return }
+        isPressing = false
+
+        if cameraManager.isBursting {
+            cameraManager.stopBurst()
+        } else {
+            handleTap()
+        }
+    }
+
     private func handleTap() {
+        guard selectedTab == 1 else { return }
         switch settings.captureMode {
         case .photo:
             cameraManager.capturePhoto()
